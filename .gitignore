@@ -1,0 +1,17 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+node_modules/
+dist/
+coverage/
+backend/models/*.pth
+backend/models/*.pt
+backend/models/*.joblib
+backend/uploads/
+*.log
+.DS_Store
+
