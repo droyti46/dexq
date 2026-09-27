@@ -23,17 +23,11 @@ export default function LandingPage() {
               Как это работает
             </Link>
           </div>
-          <div className="hero__trust">
-            <span>01</span>
-            <p>Данные обрабатываются локально и не покидают контур клиники.</p>
-          </div>
         </div>
         <div className="hero__visual" aria-hidden="true">
           <img className="hero__dots" src={dots} alt="" />
           <div className="hero__orb" />
           <img className="hero__skeleton" src={skeleton} alt="" />
-          <span className="hero__label hero__label--top">Th12</span>
-          <span className="hero__label hero__label--bottom">ROI</span>
         </div>
       </main>
       <section className="feature-strip" aria-label="Основные возможности">
@@ -56,4 +50,3 @@ export default function LandingPage() {
     </AppShell>
   );
 }
-
