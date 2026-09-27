@@ -1,6 +1,7 @@
 """Контрактные тесты API на синтетическом обезличенном DICOM."""
 
 from io import BytesIO
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import numpy as np
 from fastapi.testclient import TestClient
@@ -87,10 +88,27 @@ def test_batch_csv_keeps_failures() -> None:
     assert "Failure" in response.text
 
 
+def test_archive_csv_processes_files_without_extracting() -> None:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("study/valid_ПОП.dcm", make_dicom())
+        archive.writestr("study/broken.dcm", b"not dicom")
+        archive.writestr("notes/readme.txt", "ignored")
+    response = client.post(
+        "/api/v1/analyses/archive.csv",
+        files={"archive": ("studies.zip", buffer.getvalue(), "application/zip")},
+        data={"anatomical_region": "auto"},
+    )
+    assert response.status_code == 200
+    assert "study/valid_ПОП.dcm" in response.text
+    assert "study/broken.dcm" in response.text
+    assert "Success" in response.text
+    assert "Failure" in response.text
+
+
 def test_tilt_uses_strict_five_degree_threshold() -> None:
     straight = measure_tilt([100, 10], [100, 110])
     assert straight["violation"] is False
     tilted = measure_tilt([112, 10], [100, 110])
     assert tilted["angle_deg"] > 5
     assert tilted["violation"] is True
-

@@ -53,8 +53,16 @@ Frontend откроется на <http://localhost:3000>, API — на <http://l
 - `POST /api/v1/analyses` — один DICOM.
 - `POST /api/v1/analyses/batch` — пакет до трёх файлов.
 - `POST /api/v1/analyses/batch.csv` — пакетный CSV по формату задания.
+- `POST /api/v1/analyses/archive.csv` — обработка ZIP без распаковки на диск.
 
 Для демонстрации одиночный endpoint также принимает PNG/JPEG. Анатомическую область можно передать полем `anatomical_region`: `auto`, `lumbar_spine` или `proximal_femur`.
+
+Закрытый набор можно обработать без запуска HTTP-сервера:
+
+```powershell
+cd backend
+.\.venv\Scripts\python -m app.cli ..\studies.zip ..\results.csv
+```
 
 ## Структура
 
@@ -85,4 +93,3 @@ npm run build
 - Ось позвоночника в MVP локализуется временной детерминированной эвристикой; правило угла и порог 5° соответствуют notebook.
 - Модули бедра уже представлены в общем контракте, но до подключения моделей возвращают `not_evaluated`.
 - Автоопределение области основано на DICOM-описаниях и может потребовать ручного выбора.
-

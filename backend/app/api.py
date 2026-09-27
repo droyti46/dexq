@@ -1,13 +1,12 @@
 """HTTP API DEXQ версии 1."""
 
-import csv
-from io import StringIO
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 
 from app.analyzer import Analyzer
+from app.batch import analyze_items, read_archive, render_csv
 from app.schemas import AnalysisResult, AnatomicalRegion, BatchItem, BatchResult, CheckInfo
 
 router = APIRouter(prefix="/api/v1")
@@ -65,10 +64,11 @@ async def analyze_batch(
         filename = file.filename or "study.dcm"
         try:
             content = await _read_upload(file, request.app.state.max_upload_bytes)
-            result = _analyzer(request).analyze(content, filename, anatomical_region)
-            items.append(BatchItem(filename=filename, result=result))
         except ValueError as error:
             items.append(BatchItem(filename=filename, error=str(error)))
+            continue
+        analyzed = analyze_items(_analyzer(request), [(filename, content)], anatomical_region)
+        items.extend(analyzed.items)
     successful = sum(item.result is not None for item in items)
     return BatchResult(items=items, successful=successful, failed=len(items) - successful)
 
@@ -81,35 +81,28 @@ async def analyze_batch_csv(
 ) -> Response:
     """Возвращает пакетный отчёт в формате задания."""
     batch = await analyze_batch(request, files, anatomical_region)
-    output = StringIO(newline="")
-    fieldnames = [
-        "path_to_study",
-        "study_uid",
-        "image_uid",
-        "anatomical_region",
-        "quality_class",
-        "violation_type",
-        "processing_status",
-        "time_of_processing",
-    ]
-    writer = csv.DictWriter(output, fieldnames=fieldnames)
-    writer.writeheader()
-    for item in batch.items:
-        result = item.result
-        writer.writerow(
-            {
-                "path_to_study": item.filename,
-                "study_uid": result.study_uid if result else "",
-                "image_uid": result.image_uid if result else "",
-                "anatomical_region": result.anatomical_region if result else "unknown",
-                "quality_class": result.quality_class if result else "",
-                "violation_type": ";".join(result.violation_types) if result else item.error,
-                "processing_status": result.processing_status if result else "Failure",
-                "time_of_processing": result.time_of_processing if result else 0,
-            }
-        )
     return Response(
-        content="\ufeff" + output.getvalue(),
+        content=render_csv(batch),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="dexq-results.csv"'},
+    )
+
+
+@router.post("/analyses/archive.csv")
+async def analyze_archive_csv(
+    request: Request,
+    archive: Annotated[UploadFile, File()],
+    anatomical_region: Annotated[AnatomicalRegion, Form()] = AnatomicalRegion.AUTO,
+) -> Response:
+    """Обрабатывает ZIP тестового набора и возвращает единый CSV."""
+    try:
+        content = await _read_upload(archive, request.app.state.max_archive_bytes)
+        items = read_archive(content, request.app.state.max_upload_bytes)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    batch = analyze_items(_analyzer(request), items, anatomical_region)
+    return Response(
+        content=render_csv(batch),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="dexq-archive-results.csv"'},
     )

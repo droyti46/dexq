@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import warnings
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -54,10 +55,15 @@ def load_medical_image(content: bytes, filename: str) -> LoadedImage:
 
 def _load_dicom(content: bytes, filename: str) -> LoadedImage:
     try:
-        dataset = pydicom.dcmread(BytesIO(content), force=False)
-        if "PixelData" not in dataset:
-            raise ValueError("DICOM не содержит PixelData")
-        raw = np.asarray(apply_voi_lut(dataset.pixel_array, dataset))
+        with warnings.catch_warnings():
+            # В выданном наборе встречаются некорректные UID после анонимизации.
+            warnings.filterwarnings("ignore", message="Invalid value for VR UI")
+            dataset = pydicom.dcmread(BytesIO(content), force=False)
+            if "PixelData" not in dataset:
+                raise ValueError("DICOM не содержит PixelData")
+            raw = np.asarray(apply_voi_lut(dataset.pixel_array, dataset))
+            study_uid = _safe_uid(dataset.get("StudyInstanceUID"))
+            image_uid = _safe_uid(dataset.get("SOPInstanceUID"))
     except (InvalidDicomError, ValueError, TypeError, AttributeError, EOFError, OSError) as error:
         raise ValueError(f"Не удалось прочитать DICOM: {error}") from error
 
@@ -68,8 +74,8 @@ def _load_dicom(content: bytes, filename: str) -> LoadedImage:
     region, source = _detect_region(dataset, filename)
     return LoadedImage(
         pixels=normalized,
-        study_uid=_safe_uid(dataset.get("StudyInstanceUID")),
-        image_uid=_safe_uid(dataset.get("SOPInstanceUID")),
+        study_uid=study_uid,
+        image_uid=image_uid,
         region=region,
         region_source=source,
         preview_data_url=_preview_data_url(normalized),
@@ -140,6 +146,12 @@ def _detect_region(dataset: Dataset, filename: str) -> tuple[AnatomicalRegion, s
     hip_name_tokens = ("ппоб", "лпоб", "hip", "femur")
     if any(token in normalized_name for token in hip_name_tokens):
         return AnatomicalRegion.PROXIMAL_FEMUR, "filename"
+    width = int(dataset.get("Columns", 0) or 0)
+    height = int(dataset.get("Rows", 0) or 0)
+    if width >= 295 and 0.8 <= height / width <= 1.25:
+        return AnatomicalRegion.LUMBAR_SPINE, "dataset_geometry"
+    if 240 <= width <= 285 and 0.6 <= height / width <= 1.7:
+        return AnatomicalRegion.PROXIMAL_FEMUR, "dataset_geometry"
     return AnatomicalRegion.UNKNOWN, "dicom_metadata_inconclusive"
 
 
