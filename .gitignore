@@ -12,6 +12,13 @@ dist/
 coverage/
 backend/models/*.pth
 backend/models/*.pt
+backend/models/
+local-test-images/
+submission/
+*.onnx
+*.npz
+*.dcm
+*.dicom
 backend/models/*.joblib
 backend/uploads/
 *.log
