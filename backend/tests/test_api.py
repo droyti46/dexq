@@ -108,13 +108,71 @@ def test_batch_keeps_independent_files_in_one_study() -> None:
     assert response.json()["failed"] == 3
 
 
-def test_four_uploads_are_rejected_without_silent_truncation() -> None:
+def test_four_uploads_are_processed_without_silent_truncation() -> None:
+    payload = make_dicom()
     response = client.post(
         "/api/v1/analyses/batch",
-        files=[("files", (f"image{i}.dcm", make_dicom(), "application/dicom")) for i in range(4)],
+        files=[("files", (f"image{i}.dcm", payload, "application/dicom")) for i in range(4)],
+    )
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 4
+    assert response.json()["failed"] == 4  # Синтетический кадр не даёт двух точек.
+
+
+def test_batch_keeps_uploaded_order_when_one_image_is_too_large() -> None:
+    old_limit = app.state.max_upload_bytes
+    app.state.max_upload_bytes = 100_000
+    try:
+        response = client.post(
+            "/api/v1/analyses/batch",
+            files=[
+                ("files", ("first.dcm", make_dicom(), "application/dicom")),
+                ("files", ("too-large.dcm", b"x" * 100_001, "application/dicom")),
+                ("files", ("last.dcm", b"invalid", "application/dicom")),
+            ],
+        )
+    finally:
+        app.state.max_upload_bytes = old_limit
+    assert response.status_code == 200
+    assert [item["filename"] for item in response.json()["items"]] == [
+        "first.dcm", "too-large.dcm", "last.dcm"
+    ]
+
+
+def test_archive_json_keeps_results_for_browser() -> None:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("study/broken.dcm", b"not dicom")
+    response = client.post(
+        "/api/v1/analyses/archive",
+        files={"archive": ("study.zip", buffer.getvalue(), "application/zip")},
+    )
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 1
+    assert response.json()["failed"] == 1
+
+
+def test_archive_keeps_two_hundred_failure_rows() -> None:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
+        for index in range(200):
+            archive.writestr(f"study/case_{index:04d}.dcm", b"invalid")
+    response = client.post(
+        "/api/v1/analyses/archive.csv",
+        files={"archive": ("studies.zip", buffer.getvalue(), "application/zip")},
+    )
+    assert response.status_code == 200
+    assert response.text.count("Failure") == 200
+    assert len(response.text.splitlines()) == 201
+
+
+def test_more_than_two_hundred_uploads_are_rejected() -> None:
+    response = client.post(
+        "/api/v1/analyses/batch",
+        files=[("files", (f"image{i}.dcm", b"invalid", "application/dicom")) for i in range(201)],
     )
     assert response.status_code == 422
-    assert "1 до 3" in response.text
+    assert "200" in response.text
 
 
 def test_tilt_uses_strict_five_degree_threshold() -> None:

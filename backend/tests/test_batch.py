@@ -44,7 +44,7 @@ def _with_study(uid: str) -> bytes:
     return buffer.getvalue()
 
 
-def test_fourth_image_of_study_is_failure_and_other_study_continues() -> None:
+def test_more_than_three_images_of_study_are_processed() -> None:
     first = dicom()
     second = _with_study("1.2.4")
     items = [(f"case/a{i}.dcm", first) for i in range(3)] + [
@@ -55,10 +55,10 @@ def test_fourth_image_of_study_is_failure_and_other_study_continues() -> None:
     ]
     result = analyze_items(StudyAnalyzer(), items, AnatomicalRegion.AUTO)
     assert len(result.items) == 7
-    assert result.successful == 6
-    assert result.failed == 1
+    assert result.successful == 7
+    assert result.failed == 0
     assert result.items[4].filename == "case/a4.dcm"
-    assert "трёх" in (result.items[4].error or "")
+    assert result.items[4].result is not None
     assert result.items[-1].result is not None
 
 
@@ -85,6 +85,24 @@ def test_archive_rejects_unsafe_names(bad: str) -> None:
     with ZipFile(buffer, "w") as archive:
         archive.writestr(bad, dicom())
     with pytest.raises(ValueError, match="путь"):
+        read_archive(buffer.getvalue(), 1024 * 1024)
+
+
+def test_archive_keeps_all_supported_images_in_mixed_input() -> None:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w") as archive:
+        archive.writestr("study/one.dcm", dicom())
+        archive.writestr("study/two.png", b"not a valid PNG")
+    items = read_archive(buffer.getvalue(), 1024 * 1024)
+    assert [name for name, _ in items] == ["study/one.dcm", "study/two.png"]
+
+
+def test_archive_rejects_more_than_two_hundred_images() -> None:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w") as archive:
+        for index in range(201):
+            archive.writestr(f"case_{index:04d}.dcm", b"not dicom")
+    with pytest.raises(ValueError, match="200"):
         read_archive(buffer.getvalue(), 1024 * 1024)
 
 

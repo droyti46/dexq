@@ -31,11 +31,13 @@ export default function ResultPage() {
     }
   }, []);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [page, setPage] = useState(0);
   const [manualAxes, setManualAxes] = useState<Record<string, Axis>>({});
   if (!batch) return <Navigate to="/analyze" replace />;
 
-  const successes = batch.items.filter((item): item is typeof item & { result: AnalysisResult } => item.result !== null);
+  const successes = batch.items.filter((item): item is typeof item & { result: AnalysisResult } => item.result?.processing_status === 'Success');
   const errors = batch.items.filter((item) => item.error || item.result?.processing_status === 'Failure');
+  const pageSize = 20;
   const result = successes[activeIndex]?.result;
   const manualAxis = result ? manualAxes[result.analysis_id] ?? null : null;
   let manual: { angleDeg: number; violation: boolean } | null = null;
@@ -82,18 +84,29 @@ export default function ResultPage() {
         {errors.length > 0 && (
           <section className="result-errors" aria-label="Файлы без результата">
             <h2>Нужна повторная проверка: {errors.length}</h2>
-            <ul>{errors.map((item, index) => <li key={`${item.filename}-${index}`}>
+            <ul>{errors.slice(0, 20).map((item, index) => <li key={`${item.filename}-${index}`}>
               <strong>{item.filename}</strong>: {item.error || item.result?.error || 'Анализ не завершён'}
             </li>)}</ul>
+            {errors.length > 20 && <p>Показаны первые 20 ошибок из {errors.length}. Полный список можно получить через CSV API.</p>}
           </section>
         )}
         {!result && <p className="clinical-note">Нет снимков с завершённой оценкой. Проверьте формат и повторите загрузку.</p>}
         {result && <>
-          {successes.length > 1 && <div className="study-tabs" role="tablist" aria-label="Изображения исследования">
-            {successes.map((item, index) => <button key={`${item.result.analysis_id}-${index}`} type="button"
-              role="tab" aria-selected={activeIndex === index} className={activeIndex === index ? 'active' : ''}
-              onClick={() => setActiveIndex(index)}>Изображение {index + 1}</button>)}
-          </div>}
+          {successes.length > 1 && <>
+            {successes.length > pageSize && <div className="study-pagination">
+              <button type="button" disabled={page === 0} onClick={() => setPage(page - 1)}>Предыдущие</button>
+              <span>Снимки {page * pageSize + 1}–{Math.min((page + 1) * pageSize, successes.length)} из {successes.length}</span>
+              <button type="button" disabled={(page + 1) * pageSize >= successes.length} onClick={() => setPage(page + 1)}>Следующие</button>
+            </div>}
+            <div className="study-tabs" role="tablist" aria-label="Изображения исследования">
+              {successes.slice(page * pageSize, (page + 1) * pageSize).map((item, index) => {
+                const imageIndex = page * pageSize + index;
+                return <button key={`${item.result.analysis_id}-${imageIndex}`} type="button"
+                  role="tab" aria-selected={activeIndex === imageIndex} className={activeIndex === imageIndex ? 'active' : ''}
+                  onClick={() => setActiveIndex(imageIndex)}>Изображение {imageIndex + 1}</button>;
+              })}
+            </div>
+          </>}
           <section className="result-summary">
             <StudyViewer result={result} manualAxis={manualAxis}
               onAxisChange={(axis) => setManualAxes((current) => ({ ...current, [result.analysis_id]: axis }))} />

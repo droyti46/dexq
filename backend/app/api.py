@@ -6,11 +6,11 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 
 from app.analyzer import Analyzer
-from app.batch import analyze_items, read_archive, render_csv
+from app.batch import MAX_ARCHIVE_FILES, analyze_items, read_archive, render_csv
 from app.schemas import AnalysisResult, AnatomicalRegion, BatchItem, BatchResult, CheckInfo
 
 router = APIRouter(prefix="/api/v1")
-MAX_BATCH_FILES = 3
+MAX_BATCH_FILES = MAX_ARCHIVE_FILES
 
 
 def _analyzer(request: Request) -> Analyzer:
@@ -65,7 +65,9 @@ async def analyze_batch(
 ) -> BatchResult:
     """Обрабатывает пакет, не прерываясь из-за ошибки отдельного файла."""
     if not 1 <= len(files) <= MAX_BATCH_FILES:
-        raise HTTPException(status_code=422, detail="За один запрос принимается от 1 до 3 файлов")
+        raise HTTPException(
+            status_code=422, detail=f"За один запрос принимается от 1 до {MAX_BATCH_FILES} файлов"
+        )
     items: list[BatchItem] = []
     uploads: list[tuple[str, bytes]] = []
     for file in files:
@@ -73,10 +75,16 @@ async def analyze_batch(
         try:
             content = await _read_upload(file, request.app.state.max_upload_bytes)
         except ValueError as error:
+            uploads.append((filename, b""))
             items.append(BatchItem(filename=filename, error=str(error)))
             continue
         uploads.append((filename, content))
-    items.extend(analyze_items(_analyzer(request), uploads, anatomical_region).items)
+    analyzed = analyze_items(
+        _analyzer(request), [upload for upload in uploads if upload[1]], anatomical_region
+    ).items
+    completed = iter(analyzed)
+    errors = iter(items)
+    items = [next(completed) if content else next(errors) for _, content in uploads]
     successful = sum(
         item.result is not None and item.result.processing_status == "Success" for item in items
     )
@@ -96,6 +104,21 @@ async def analyze_batch_csv(
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="dexq-results.csv"'},
     )
+
+
+@router.post("/analyses/archive", response_model=BatchResult)
+async def analyze_archive(
+    request: Request,
+    archive: Annotated[UploadFile, File()],
+    anatomical_region: Annotated[AnatomicalRegion, Form()] = AnatomicalRegion.AUTO,
+) -> BatchResult:
+    """Обрабатывает ZIP для браузера, сохраняя результаты и ошибки каждого файла."""
+    try:
+        content = await _read_upload(archive, request.app.state.max_archive_bytes)
+        items = read_archive(content, request.app.state.max_upload_bytes)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return analyze_items(_analyzer(request), items, anatomical_region)
 
 
 @router.post("/analyses/archive.csv")

@@ -9,11 +9,10 @@ from pathlib import Path, PurePosixPath
 from zipfile import BadZipFile, ZipFile
 
 from app.analyzer import Analyzer
-from app.imaging import safe_dicom_fields
 from app.schemas import AnatomicalRegion, BatchItem, BatchResult
 
 SUPPORTED_SUFFIXES = {".dcm", ".dicom", ".png", ".jpg", ".jpeg"}
-MAX_ARCHIVE_FILES = 5_000
+MAX_ARCHIVE_FILES = 200
 MAX_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
 
 
@@ -42,14 +41,6 @@ def read_archive(content: bytes, max_file_bytes: int) -> list[tuple[str, bytes]]
                 and PurePosixPath(info.filename.replace("\\", "/")).suffix.lower()
                 in SUPPORTED_SUFFIXES
             ]
-            dicom_candidates = [
-                info
-                for info in candidates
-                if PurePosixPath(info.filename.replace("\\", "/")).suffix.lower()
-                in {".dcm", ".dicom"}
-            ]
-            if dicom_candidates:
-                candidates = dicom_candidates
             if not candidates:
                 raise ValueError("В архиве нет поддерживаемых медицинских изображений")
             if len(candidates) > MAX_ARCHIVE_FILES:
@@ -112,19 +103,7 @@ def analyze_items(
         Пакетный результат с количеством успешных и ошибочных файлов.
     """
     results: list[BatchItem] = []
-    study_counts: dict[str, int] = {}
     for filename, content in items:
-        try:
-            uid, _, _ = safe_dicom_fields(content, Path(filename).suffix.lower())
-        except ValueError:
-            uid = None
-        if uid is not None:
-            study_counts[uid] = study_counts.get(uid, 0) + 1
-        if uid is not None and study_counts[uid] > 3:
-            results.append(
-                BatchItem(filename=filename, error="Больше трёх изображений в исследовании")
-            )
-            continue
         try:
             result = analyzer.analyze(content, filename, region)
             if result.processing_status == "Failure":
@@ -216,9 +195,6 @@ def collect_local_files(path: Path, max_file_bytes: int) -> list[tuple[str, byte
             for item in path.rglob("*")
             if item.is_file() and item.suffix.lower() in SUPPORTED_SUFFIXES
         )
-        dicom_files = [item for item in files if item.suffix.lower() in {".dcm", ".dicom"}]
-        if dicom_files:
-            files = dicom_files
     if not files:
         raise ValueError("Поддерживаемые изображения не найдены")
     if len(files) > MAX_ARCHIVE_FILES:
