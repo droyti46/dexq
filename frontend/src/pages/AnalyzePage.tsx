@@ -5,7 +5,7 @@ import { analyzeStudies } from '../api';
 import AppShell from '../components/AppShell';
 import type { AnatomicalRegion } from '../types';
 
-const allowedExtensions = ['.dcm', '.dicom', '.png', '.jpg', '.jpeg'];
+const allowedExtensions = ['.dcm', '.dicom', '.png'];
 
 export default function AnalyzePage() {
   const navigate = useNavigate();
@@ -18,7 +18,11 @@ export default function AnalyzePage() {
 
   function acceptFiles(list: FileList | null) {
     if (!list) return;
-    const next = Array.from(list).slice(0, 3);
+    const next = Array.from(list);
+    if (next.length > 3) {
+      setError('В одном запросе не более трёх изображений. Ни один файл не отброшен.');
+      return;
+    }
     const invalid = next.find(
       (file) => !allowedExtensions.some((extension) => file.name.toLowerCase().endsWith(extension)),
     );
@@ -76,7 +80,7 @@ export default function AnalyzePage() {
               <input
                 ref={inputRef}
                 type="file"
-                accept=".dcm,.dicom,.png,.jpg,.jpeg,application/dicom"
+                accept=".dcm,.dicom,.png,application/dicom"
                 multiple
                 hidden
                 onChange={(event: ChangeEvent<HTMLInputElement>) => acceptFiles(event.target.files)}
@@ -86,7 +90,7 @@ export default function AnalyzePage() {
               </div>
               <h2>{files.length ? `${files.length} файл(а) выбрано` : 'Перетащите DICOM сюда'}</h2>
               <p>или нажмите, чтобы выбрать на компьютере</p>
-              <span>DICOM · PNG/JPEG для демо · до 50 МБ</span>
+              <span>DICOM · нативный PNG для демо · до 50 МБ</span>
             </div>
 
             {files.length > 0 && (
