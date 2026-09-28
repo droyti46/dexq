@@ -33,6 +33,7 @@ include = ["app*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["model: локальный эталонный ONNX-инференс на обезличенных тестовых файлах"]
 
 [tool.ruff]
 line-length = 100

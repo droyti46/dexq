@@ -2,14 +2,12 @@
 
 import hashlib
 import stat
-import sys
 from pathlib import Path
 from zipfile import ZipFile, ZipInfo
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from prepare_reference import prepare_reference, verify_models  # noqa: E402
+from app.reference_assets import prepare_reference, verify_models
 
 
 def _sha(path: Path) -> str:
