@@ -4,6 +4,9 @@ services:
       context: ./backend
     environment:
       DEXQ_MAX_UPLOAD_MB: 50
+      DEXQ_MODELS_DIR: /models/reference
+    volumes:
+      - ${DEXQ_MODELS_DIR}:/models/reference:ro
     ports:
       - "8000:8000"
     healthcheck:

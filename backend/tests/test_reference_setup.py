@@ -97,7 +97,7 @@ def test_copies_source_and_verifies_model_digest(tmp_path: Path) -> None:
         provenance["router/checkpoints/runtime/resnet18_features.onnx"]
         == hashlib.sha256(model).hexdigest()
     )
-    verify_models(models)
+    verify_models(models, expected_reference_sha=_sha(path))
     installed.write_bytes(b"tampered")
     with pytest.raises(ValueError, match="SHA-256"):
-        verify_models(models)
+        verify_models(models, expected_reference_sha=_sha(path))

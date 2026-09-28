@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 from zipfile import BadZipFile, ZipFile, ZipInfo
 
 REFERENCE_SHA = "2cd75f3777a4a7735d8e36cca371d4637b54053fb9283863c64c7214535a8867"
+REFERENCE_MANIFEST_SHA = "7fb61cf6fa5cc47b07f2fdf738b1a31ad0bbb772c6c4d15527c7c91742e4a32b"
 PREFIX = "dxa_qc_code/combined_qc/"
 MODULES = ("router", "hip", "spine")
 MAX_MEMBER_BYTES = 1024 * 1024 * 1024
@@ -136,20 +137,28 @@ def prepare_reference(
     return manifest
 
 
-def verify_models(models_root: Path) -> None:
+def verify_models(models_root: Path, *, expected_reference_sha: str = REFERENCE_SHA) -> None:
     """Проверяет каждый установленный runtime-файл до начала инференса.
 
     Args:
         models_root: Корень локально установленных весов.
+        expected_reference_sha: Контрольная сумма исходной поставки.
 
     Raises:
         ValueError: Если манифест отсутствует, повреждён или файл подменён.
     """
     manifest_path = models_root / "installed-manifest.json"
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest_bytes = manifest_path.read_bytes()
+        manifest = json.loads(manifest_bytes)
     except (OSError, ValueError) as error:
         raise ValueError("Model manifest is unavailable") from error
+    if manifest.get("reference_sha256") != expected_reference_sha:
+        raise ValueError("Model manifest reference SHA-256 mismatch")
+    if expected_reference_sha == REFERENCE_SHA and (
+        hashlib.sha256(manifest_bytes).hexdigest() != REFERENCE_MANIFEST_SHA
+    ):
+        raise ValueError("Model inventory SHA-256 mismatch")
     entries = manifest.get("files")
     if not isinstance(entries, dict) or not entries:
         raise ValueError("Model manifest has no files")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -25,12 +26,12 @@ class ReferenceRuntime:
 
     def __init__(
         self,
-        models_root: Path = DEFAULT_MODELS_ROOT,
+        models_root: Path | None = None,
         *,
         pipeline: Any | None = None,
         verify: bool = True,
     ) -> None:
-        self.models_root = Path(models_root)
+        self.models_root = Path(models_root or os.getenv("DEXQ_MODELS_DIR", DEFAULT_MODELS_ROOT))
         self._pipeline = pipeline
         self._verify = verify
         self._lock = RLock()
