@@ -19,6 +19,40 @@ from pydicom.pixels import apply_voi_lut
 from app.schemas import AnatomicalRegion
 
 
+def safe_dicom_fields(content: bytes, suffix: str) -> tuple[str | None, str | None, bool]:
+    """Читает только два UID и факт наличия неподдерживаемой проекции.
+
+    Args:
+        content: Исходные байты DICOM или PNG.
+        suffix: Расширение входного файла.
+
+    Returns:
+        UID исследования, UID изображения и признак явной иной проекции.
+
+    Raises:
+        ValueError: Если DICOM повреждён или пуст.
+    """
+    if suffix.lower() == ".png":
+        return None, None, False
+    if not content:
+        raise ValueError("Файл пуст")
+    try:
+        with pydicom.config.disable_value_validation():
+            dataset = pydicom.dcmread(
+                BytesIO(content),
+                stop_before_pixels=True,
+                specific_tags=["StudyInstanceUID", "SOPInstanceUID", "ViewPosition"],
+            )
+            view = str(dataset.get("ViewPosition", "")).strip().lower()
+            return (
+                _safe_uid(dataset.get("StudyInstanceUID")),
+                _safe_uid(dataset.get("SOPInstanceUID")),
+                bool(view and view != "unknown"),
+            )
+    except (InvalidDicomError, OSError, ValueError) as error:
+        raise ValueError("Не удалось прочитать DICOM") from error
+
+
 @dataclass(frozen=True, slots=True)
 class LoadedImage:
     """Безопасное представление загруженного изображения."""
@@ -159,7 +193,11 @@ def _safe_uid(value: object) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
-    return text if text and len(text) <= 128 else None
+    return (
+        text
+        if text and len(text) <= 128 and all(part.isdecimal() for part in text.split("."))
+        else None
+    )
 
 
 def _preview_data_url(pixels: np.ndarray) -> str:

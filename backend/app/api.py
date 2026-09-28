@@ -25,9 +25,11 @@ async def _read_upload(file: UploadFile, max_bytes: int) -> bytes:
 
 
 @router.get("/health")
-async def health() -> dict[str, str]:
-    """Возвращает готовность API."""
-    return {"status": "ok", "service": "DEXQ API", "version": "0.1.0"}
+async def health(request: Request) -> dict[str, str]:
+    """Проверяет наличие всех локальных моделей перед началом обработки."""
+    if not _analyzer(request).runtime.ready():
+        raise HTTPException(status_code=503, detail="Локальный комплект моделей недоступен")
+    return {"status": "ready", "service": "DEXQ API", "version": "0.1.0"}
 
 
 @router.get("/checks", response_model=list[CheckInfo])
@@ -45,7 +47,12 @@ async def analyze_file(
     """Обрабатывает один файл полностью в памяти."""
     try:
         content = await _read_upload(file, request.app.state.max_upload_bytes)
-        return _analyzer(request).analyze(content, file.filename or "study.dcm", anatomical_region)
+        result = _analyzer(request).analyze(
+            content, file.filename or "study.dcm", anatomical_region
+        )
+        if result.processing_status == "Failure":
+            raise HTTPException(status_code=422, detail=result.error or "Анализ не завершён")
+        return result
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 

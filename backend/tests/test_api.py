@@ -29,14 +29,12 @@ def make_dicom() -> bytes:
     dataset.Columns = 192
     dataset.SamplesPerPixel = 1
     dataset.PhotometricInterpretation = "MONOCHROME2"
-    dataset.BitsAllocated = 16
-    dataset.BitsStored = 12
-    dataset.HighBit = 11
+    dataset.BitsAllocated = 8
+    dataset.BitsStored = 8
+    dataset.HighBit = 7
     dataset.PixelRepresentation = 0
     y, x = np.mgrid[:256, :192]
-    pixels = (2800 * np.exp(-((x - 96) ** 2) / 500 - ((y - 128) ** 2) / 9000)).astype(
-        np.uint16
-    )
+    pixels = (255 * np.exp(-((x - 96) ** 2) / 500 - ((y - 128) ** 2) / 9000)).astype(np.uint8)
     dataset.PixelData = pixels.tobytes()
     buffer = BytesIO()
     dataset.save_as(buffer, enforce_file_format=True)
@@ -44,34 +42,25 @@ def make_dicom() -> bytes:
 
 
 def test_health_and_checks() -> None:
-    assert client.get("/api/v1/health").json()["status"] == "ok"
+    assert client.get("/api/v1/health").json()["status"] == "ready"
     checks = client.get("/api/v1/checks").json()
     assert {item["check_id"] for item in checks} == {
-        "spine_coverage",
-        "spine_tilt",
-        "artifact",
-        "hip_coverage",
-        "hip_rotation",
+        "spine_positioning",
+        "spine_axis",
+        "spine_artifacts",
+        "hip_positioning_rotation",
         "hip_roi",
     }
 
 
-def test_analyze_dicom() -> None:
+def test_unclassifiable_axis_returns_controlled_failure() -> None:
     response = client.post(
         "/api/v1/analyses",
         files={"file": ("study.dcm", make_dicom(), "application/dicom")},
-        data={"anatomical_region": "auto"},
+        data={"anatomical_region": "lumbar_spine"},
     )
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["anatomical_region"] == "lumbar_spine"
-    assert payload["study_uid"]
-    assert payload["preview_data_url"].startswith("data:image/png;base64,")
-    assert {item["check_id"] for item in payload["checks"]} == {
-        "spine_coverage",
-        "spine_tilt",
-        "artifact",
-    }
+    assert response.status_code == 422
+    assert "SECRET" not in response.text
 
 
 def test_batch_csv_keeps_failures() -> None:
@@ -81,11 +70,11 @@ def test_batch_csv_keeps_failures() -> None:
             ("files", ("valid.dcm", make_dicom(), "application/dicom")),
             ("files", ("broken.dcm", b"not dicom", "application/dicom")),
         ],
-        data={"anatomical_region": "auto"},
+        data={"anatomical_region": "lumbar_spine"},
     )
     assert response.status_code == 200
-    assert "Success" in response.text
-    assert "Failure" in response.text
+    assert "Success" not in response.text
+    assert response.text.count("Failure") == 2
 
 
 def test_archive_csv_processes_files_without_extracting() -> None:
@@ -97,13 +86,13 @@ def test_archive_csv_processes_files_without_extracting() -> None:
     response = client.post(
         "/api/v1/analyses/archive.csv",
         files={"archive": ("studies.zip", buffer.getvalue(), "application/zip")},
-        data={"anatomical_region": "auto"},
+        data={"anatomical_region": "lumbar_spine"},
     )
     assert response.status_code == 200
     assert "study/valid_ПОП.dcm" in response.text
     assert "study/broken.dcm" in response.text
-    assert "Success" in response.text
-    assert "Failure" in response.text
+    assert "Success" not in response.text
+    assert response.text.count("Failure") == 2
 
 
 def test_tilt_uses_strict_five_degree_threshold() -> None:
