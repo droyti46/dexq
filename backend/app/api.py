@@ -67,6 +67,7 @@ async def analyze_batch(
     if not 1 <= len(files) <= MAX_BATCH_FILES:
         raise HTTPException(status_code=422, detail="За один запрос принимается от 1 до 3 файлов")
     items: list[BatchItem] = []
+    uploads: list[tuple[str, bytes]] = []
     for file in files:
         filename = file.filename or "study.dcm"
         try:
@@ -74,9 +75,11 @@ async def analyze_batch(
         except ValueError as error:
             items.append(BatchItem(filename=filename, error=str(error)))
             continue
-        analyzed = analyze_items(_analyzer(request), [(filename, content)], anatomical_region)
-        items.extend(analyzed.items)
-    successful = sum(item.result is not None for item in items)
+        uploads.append((filename, content))
+    items.extend(analyze_items(_analyzer(request), uploads, anatomical_region).items)
+    successful = sum(
+        item.result is not None and item.result.processing_status == "Success" for item in items
+    )
     return BatchResult(items=items, successful=successful, failed=len(items) - successful)
 
 

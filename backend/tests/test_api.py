@@ -95,6 +95,28 @@ def test_archive_csv_processes_files_without_extracting() -> None:
     assert response.text.count("Failure") == 2
 
 
+def test_batch_keeps_independent_files_in_one_study() -> None:
+    payload = make_dicom()
+    response = client.post(
+        "/api/v1/analyses/batch",
+        files=[("files", (f"image{i}.dcm", payload, "application/dicom")) for i in range(3)],
+        data={"anatomical_region": "lumbar_spine"},
+    )
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 3
+    assert response.json()["successful"] == 0
+    assert response.json()["failed"] == 3
+
+
+def test_four_uploads_are_rejected_without_silent_truncation() -> None:
+    response = client.post(
+        "/api/v1/analyses/batch",
+        files=[("files", (f"image{i}.dcm", make_dicom(), "application/dicom")) for i in range(4)],
+    )
+    assert response.status_code == 422
+    assert "1 до 3" in response.text
+
+
 def test_tilt_uses_strict_five_degree_threshold() -> None:
     straight = measure_tilt([100, 10], [100, 110])
     assert straight["violation"] is False

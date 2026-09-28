@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import csv
+import stat
 from io import BytesIO, StringIO
 from pathlib import Path, PurePosixPath
 from zipfile import BadZipFile, ZipFile
 
 from app.analyzer import Analyzer
+from app.imaging import safe_dicom_fields
 from app.schemas import AnatomicalRegion, BatchItem, BatchResult
 
 SUPPORTED_SUFFIXES = {".dcm", ".dicom", ".png", ".jpg", ".jpeg"}
@@ -52,6 +54,35 @@ def read_archive(content: bytes, max_file_bytes: int) -> list[tuple[str, bytes]]
                 raise ValueError("В архиве нет поддерживаемых медицинских изображений")
             if len(candidates) > MAX_ARCHIVE_FILES:
                 raise ValueError(f"В архиве больше {MAX_ARCHIVE_FILES} изображений")
+            seen: set[str] = set()
+            for info in candidates:
+                raw = info.filename
+                parts = raw.split("/")
+                if (
+                    "\\" in raw
+                    or ":" in raw
+                    or raw.startswith("/")
+                    or any(
+                        part in {"", ".", ".."}
+                        or part.split(".")[0].upper()
+                        in {
+                            "CON",
+                            "PRN",
+                            "AUX",
+                            "NUL",
+                            *(f"COM{i}" for i in range(1, 10)),
+                            *(f"LPT{i}" for i in range(1, 10)),
+                        }
+                        for part in parts
+                    )
+                    or info.create_system == 3
+                    and stat.S_IFMT(info.external_attr >> 16) == stat.S_IFLNK
+                ):
+                    raise ValueError("Небезопасный путь внутри ZIP-архива")
+                folded = raw.casefold()
+                if folded in seen:
+                    raise ValueError("повтор имени изображения в ZIP-архиве")
+                seen.add(folded)
             if any(info.flag_bits & 0x1 for info in candidates):
                 raise ValueError("Зашифрованные ZIP-архивы не поддерживаются")
             if any(info.file_size > max_file_bytes for info in candidates):
@@ -81,13 +112,36 @@ def analyze_items(
         Пакетный результат с количеством успешных и ошибочных файлов.
     """
     results: list[BatchItem] = []
+    study_counts: dict[str, int] = {}
     for filename, content in items:
         try:
+            uid, _, _ = safe_dicom_fields(content, Path(filename).suffix.lower())
+        except ValueError:
+            uid = None
+        if uid is not None:
+            study_counts[uid] = study_counts.get(uid, 0) + 1
+        if uid is not None and study_counts[uid] > 3:
+            results.append(
+                BatchItem(filename=filename, error="Больше трёх изображений в исследовании")
+            )
+            continue
+        try:
             result = analyzer.analyze(content, filename, region)
-            results.append(BatchItem(filename=filename, result=result))
-        except ValueError as error:
-            results.append(BatchItem(filename=filename, error=str(error)))
-    successful = sum(item.result is not None for item in results)
+            if result.processing_status == "Failure":
+                results.append(
+                    BatchItem(
+                        filename=filename, result=result, error=result.error or "Анализ не завершён"
+                    )
+                )
+            else:
+                results.append(BatchItem(filename=filename, result=result))
+        except (ValueError, OSError, RuntimeError):
+            results.append(
+                BatchItem(filename=filename, error="Не удалось безопасно обработать файл")
+            )
+    successful = sum(
+        item.result is not None and item.result.processing_status == "Success" for item in results
+    )
     return BatchResult(items=results, successful=successful, failed=len(results) - successful)
 
 
@@ -121,8 +175,12 @@ def render_csv(batch: BatchResult) -> str:
                 "study_uid": result.study_uid if result else "",
                 "image_uid": result.image_uid if result else "",
                 "anatomical_region": result.anatomical_region if result else "unknown",
-                "quality_class": result.quality_class if result else "",
-                "violation_type": ";".join(result.violation_types) if result else item.error,
+                "quality_class": result.quality_class
+                if result and result.processing_status == "Success"
+                else "",
+                "violation_type": ";".join(sorted(result.violation_types))
+                if result and result.processing_status == "Success"
+                else "",
                 "processing_status": result.processing_status if result else "Failure",
                 "time_of_processing": result.time_of_processing if result else 0,
             }
