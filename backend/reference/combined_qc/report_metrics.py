@@ -31,8 +31,8 @@ TASKS = {
     "spine": ("spine_positioning", "spine_axis", "spine_artifacts"),
 }
 SCORE_SEMANTICS = {
-    "hip_positioning_rotation": "five-fold mean of threshold-centered scores; threshold 0.5; uncalibrated",
-    "hip_roi": "five-fold mean of threshold-centered scores; threshold 0.5; uncalibrated",
+    "hip_positioning_rotation": "single logistic regression on frozen ResNet18 features; threshold-centered score 0.5; uncalibrated",
+    "hip_roi": "single logistic regression on frozen ResNet18 features; threshold-centered score 0.5; uncalibrated",
     "spine_positioning": "maximum standardized coverage-violation margin; threshold 0; not a probability",
     "spine_axis": "absolute native-coordinate angle in degrees; threshold 5; not a probability",
     "spine_artifacts": "single logistic-regression violation score; threshold 0.5; uncalibrated",
@@ -210,7 +210,7 @@ def _comparison(items):
             "all_quality_labels_identical": not absent and not changed}
 
 
-def run(*, output=None, ci=False):
+def run(*, output=None, ci=False, router_checkpoints=None, hip_checkpoints=None, spine_checkpoints=None):
     started = time.perf_counter()
     output = Path(output).expanduser().resolve() if output else ROOT / "outputs/deployment_metrics.json"
     rows = sorted(_read_rows(MANIFEST), key=lambda row: row["image_id"])
@@ -221,7 +221,8 @@ def run(*, output=None, ci=False):
     if any(not path.is_file() for path in sources.values()):
         raise FileNotFoundError("A canonical native image is missing; no inputs may be excluded")
     _progress(ci, "Loading one persistent QCPipeline; training/conversion disabled")
-    qc = QCPipeline(verbose=False, ci=False).load_checkpoints()
+    qc = QCPipeline(router_checkpoints, hip_checkpoints_dir=hip_checkpoints,
+                    spine_checkpoints_dir=spine_checkpoints, verbose=False, ci=False).load_checkpoints()
     identities = _identities(qc)
     inventory = _runtime_inventory(qc)
     provenance = {name: deepcopy(handle.provenance) for name, handle in qc.models.items()}
@@ -308,7 +309,7 @@ def run(*, output=None, ci=False):
         "comparison_to_previous_integration": comparison,
         "limitations": [
             "All tables use current full inference; quality models/thresholds have seen these development data",
-            "Hip quality uses the actual five-fold aggregate, not a held-out fold selected for evaluation",
+            "Hip quality uses one frozen ResNet18 and two final LRs fitted on all150 labels; grouped validation trains separate temporary models",
             "The single spine artifact classifier was fitted on all99 labeled spine images",
             "Hip side truth is provisional; perfect agreement does not verify patient anatomical side",
             "OR has no continuous production score: its ROC AUC is intentionally null; heterogeneous task scores are not combined into an invented probability",

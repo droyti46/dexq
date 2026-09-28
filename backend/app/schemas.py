@@ -87,6 +87,7 @@ class BatchItem(BaseModel):
     filename: str
     result: AnalysisResult | None = None
     error: str | None = None
+    input_path: str | None = Field(default=None, exclude=True)
 
 
 class BatchResult(BaseModel):

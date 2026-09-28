@@ -19,7 +19,7 @@ DATA_ROOT = MODULE_ROOT.parent / "data" / "dxa_v1"
 
 def train(data=None, *, checkpoints_dir=None, device="auto", epochs=None,
           verbose=False, ci=False, resume=True, convert=True):
-    """Train V13 plus the automatic side classifier and optionally convert."""
+    """Fit two quality LRs plus automatic side; optionally publish conversion."""
     with quiet_output(enabled=bool(verbose or ci)):
         from .training import train as train_impl
         return train_impl(data, checkpoints_dir=checkpoints_dir, device=device, epochs=epochs,
@@ -27,7 +27,7 @@ def train(data=None, *, checkpoints_dir=None, device="auto", epochs=None,
 
 
 def load_checkpoints(checkpoints_dir=None, *, device="auto", verbose=False, ci=False):
-    """Load ten quality graphs, one side feature graph and its numeric model."""
+    """Load one shared quality graph, two LRs and the automatic side pair."""
     base, _, runtime = resolve_checkpoint_paths("hip", checkpoints_dir)
     if not (runtime / "manifest.json").is_file():
         raise FileNotFoundError(f"Hip runtime checkpoints are missing in {runtime}; run hip conversion first")
@@ -182,7 +182,8 @@ def infer(source, *, checkpoints_dir=None, device="auto", verbose=False, ci=Fals
                                "image_id": row.get("image_id") if row else None,
                                "study_id": row.get("study_id") if row else None,
                                "checkpoints_dir": str(predictor.checkpoints_dir), "device": predictor.device,
-                               "score_type": "five_fold_threshold_centered_mean",
+                               "score_type": "single_logreg_threshold_centered",
+                               "models": predictor.provenance,
                                "visualization_source": visualization_source, "note": raw["note"]},
                   "geometry": _geometry(prepared, original_geometry, native, side, predictor.config),
                   "image": image_payload(Image.fromarray(native))}

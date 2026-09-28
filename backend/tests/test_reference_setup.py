@@ -7,7 +7,7 @@ from zipfile import ZipFile, ZipInfo
 
 import pytest
 
-from app.reference_assets import prepare_reference, verify_models
+from app.reference_assets import REFERENCE_SHA, prepare_reference, verify_models
 
 
 def _sha(path: Path) -> str:
@@ -20,12 +20,35 @@ def _archive(path: Path, entries: list[tuple[str, bytes]]) -> None:
             archive.writestr(name, payload)
 
 
+def test_pin_targets_optimized_reference_archive() -> None:
+    assert REFERENCE_SHA == "b92ed6e89b1bb54358b1e06681842dbecac006880cf9062ea68980673ff12f0a"
+
+
 def test_rejects_mismatched_archive_digest(tmp_path: Path) -> None:
     path = tmp_path / "input.zip"
     _archive(path, [("dxa_qc_code/combined_qc/common.py", b"pass\n")])
     with pytest.raises(ValueError, match="SHA-256"):
         prepare_reference(path, tmp_path / "source", tmp_path / "models", expected_zip_sha="0" * 64)
     assert not (tmp_path / "source").exists()
+
+
+def test_installer_rejects_existing_reference_source_with_different_bytes(tmp_path: Path) -> None:
+    path = tmp_path / "input.zip"
+    _archive(
+        path,
+        [
+            ("dxa_qc_code/combined_qc/common.py", b"# newer\n"),
+            ("dxa_qc_code/combined_qc/router/checkpoints/runtime/model.onnx", b"weights"),
+        ],
+    )
+    existing = tmp_path / "source/combined_qc/common.py"
+    existing.parent.mkdir(parents=True)
+    existing.write_bytes(b"# older\n")
+    with pytest.raises(ValueError, match="source|SHA-256"):
+        prepare_reference(
+            path, tmp_path / "source", tmp_path / "models", expected_zip_sha=_sha(path)
+        )
+    assert existing.read_bytes() == b"# older\n"
 
 
 def test_ignores_unrelated_archive_entries(tmp_path: Path) -> None:

@@ -1,4 +1,4 @@
-"""Development-only model selection, followed by one sealed study holdout."""
+"""One fixed region classifier fitted on all labels; grouped CV runs separately."""
 from __future__ import annotations
 import json
 from pathlib import Path
@@ -131,106 +131,72 @@ def train(data=None, *, checkpoints_dir=None, device='auto', epochs=None,
 
 
 def _train(data=None, *, checkpoints_dir=None, verbose=False, ci=False, convert=True):
-    started=time.perf_counter()
-    data=Path(data).resolve() if data else DATA
-    base=Path(checkpoints_dir).resolve() if checkpoints_dir else ROOT/'checkpoints'
-    output=base/'outputs';output.mkdir(parents=True,exist_ok=True)
-    progress=Progress('router',verbose or ci)
-    split_path=ROOT/'split.json';split=json.loads(split_path.read_text())
-    if sha256(data/'manifest.jsonl')!=split['manifest_sha256']:raise ValueError('Data changed after the holdout was frozen')
-    rows=records(data);ids=[r['image_id'] for r in rows]
-    if set(split['development_image_ids'])&set(split['holdout_image_ids']) or set(ids)!=set(split['development_image_ids'])|set(split['holdout_image_ids']):
-        raise ValueError('Invalid frozen split membership')
-    y=np.asarray([int(r['anatomical_region']=='lumbar_spine') for r in rows]);groups=np.asarray([r['study_id'] for r in rows])
-    dev=np.asarray([i for i,v in enumerate(ids) if v in set(split['development_image_ids'])])
-    held=np.asarray([i for i,v in enumerate(ids) if v in set(split['holdout_image_ids'])])
-    if set(groups[dev])&set(groups[held]):raise ValueError('Holdout study leakage')
-    backbone=prepare_backbone(base,verbose=verbose,ci=ci)
+    """Fit the fixed production recipe on every region label; CV is separate."""
+    started = time.perf_counter()
+    data = Path(data).resolve() if data else DATA
+    base = Path(checkpoints_dir).resolve() if checkpoints_dir else ROOT / 'checkpoints'
+    rows = records(data)
+    ids = [r['image_id'] for r in rows]
+    y = np.asarray([int(r['anatomical_region'] == 'lumbar_spine') for r in rows])
+    progress = Progress('router', verbose or ci)
+    backbone = prepare_backbone(base, verbose=verbose, ci=ci)
     from .features import PROJECT
-    features=_cache_features(rows,data,PROJECT/'source_data',backbone,base/'source/features.npz',progress)
-    comparisons=[]
-    outer=list(StratifiedGroupKFold(5,shuffle=True,random_state=SEED).split(features[dev],y[dev],groups[dev]))
-    for representation in REPRESENTATIONS:
-        probabilities=np.full(len(dev),np.nan);fold_reports=[]
-        for fold,(train,val) in enumerate(outer):
-            x_train=features[dev[train]];y_train=y[dev[train]];group_train=groups[dev[train]]
-            assert not set(group_train)&set(groups[dev[val]])
-            c,inner=choose_c(x_train,y_train,group_train,representation)
-            model=fit_model(subset(x_train,representation),y_train,c)
-            probabilities[val]=model.predict_proba(subset(features[dev[val]],representation))[:,1]
-            fold_reports.append({'fold':fold,'C':c,'n_train':len(train),'n_validation':len(val),
-                'train_studies':sorted(set(group_train)),'validation_studies':sorted(set(groups[dev[val]])),
-                'metrics':metrics(y[dev[val]],probabilities[val]),'inner_selection':inner})
-            progress.update('development',f'{representation}: fold {fold+1}',fold+1,5)
-        comparisons.append({'representation':representation,'metrics':metrics(y[dev],probabilities),
-            'folds':fold_reports,'oof_probabilities':probabilities.tolist(),
-            'error_ids':[ids[dev[i]] for i in np.flatnonzero((probabilities>=.5).astype(int)!=y[dev])]})
-    selected=max(comparisons,key=lambda r:(r['metrics']['macro_f1'],r['metrics']['balanced_accuracy'],r['metrics']['roc_auc_spine'],r['representation']=='global_512'))
-    representation=selected['representation']
-    final_c,final_selection=choose_c(features[dev],y[dev],groups[dev],representation)
-    selection={'representation':representation,'C':final_c,'selected_without_holdout':True,
-        'split_sha256':sha256(split_path),'development_comparison':comparisons,'final_inner_cv':final_selection}
-    # Persist the choice before any holdout probability is computed.
-    write_json(output/'selection_before_holdout.json',selection)
-    progress.update('train',f'One final logistic model: {representation}, C={final_c}, {len(dev)} images')
-    model=fit_model(subset(features[dev],representation),y[dev],final_c)
-    scaler=model.named_steps['standardscaler'];lr=model.named_steps['logisticregression']
-    source=base/'source';source.mkdir(parents=True,exist_ok=True)
-    from .bootstrap import export_recipe_sha256
-    spec={'format':'image_only_region_logreg_v1','representation':representation,'n_features':int(lr.coef_.shape[1]),
-        'class_names':['hip','lumbar_spine'],'threshold':.5,'review_threshold':.9,
+    features = _cache_features(rows, data, PROJECT/'source_data', backbone,
+                               base/'source/features.npz', progress)
+    representation, final_c = 'global_512', .1
+    progress.update('train', 'One final region LR: all255 labels, global512, C=.1', 0, 1)
+    model = fit_model(subset(features, representation), y, final_c)
+    scaler, lr = model.named_steps['standardscaler'], model.named_steps['logisticregression']
+    from .bootstrap import export_recipe_sha256, SOURCE_NAME
+    source = base/'source'
+    spec = {'format':'image_only_region_logreg_v1', 'representation':representation,
+        'n_features':512, 'class_names':['hip','lumbar_spine'], 'threshold':.5, 'review_threshold':.9,
         'preprocessing':'trim_exact_black_border_direct320_mirror_mean_v1',
-        'backbone_sha256':sha256(backbone),'ImageNet_state_sha256':RESNET_STATE_SHA,
+        'backbone_sha256':sha256(backbone), 'ImageNet_state_sha256':RESNET_STATE_SHA,
         'backbone_export_recipe_sha256':export_recipe_sha256(),
-        'feature_cache_metadata_sha256':sha256(base/'source/features.json'),
-        'feature_cache_sha256':sha256(base/'source/features.npz'),
+        'feature_cache_metadata_sha256':sha256(source/'features.json'),
+        'feature_cache_sha256':sha256(source/'features.npz'),
         'training_recipe_sha256':recipe_fingerprint(),
-        'train_image_ids':[ids[i] for i in dev],'holdout_image_ids':[ids[i] for i in held],
-        'manifest_sha256':split['manifest_sha256'],'split_sha256':sha256(split_path),
-        'C':final_c,'seed':SEED,'trained_on_holdout':False}
-    target=source/'region_logreg.npz'
+        'train_image_ids':ids, 'holdout_image_ids':[],
+        'manifest_sha256':sha256(data/'manifest.jsonl'), 'split_sha256':sha256(ROOT/'split.json'),
+        'C':final_c, 'seed':SEED, 'trained_on_holdout':None,
+        'fit_scope':'all_available_labels', 'independent_final_checkpoint_validation':False,
+        'historical_holdout_included_in_final_fit':True,
+        'validation_command':'python -m combined_qc.validate'}
+    target = source/'region_logreg.npz'
     import tempfile
-    with tempfile.TemporaryDirectory(dir=source,prefix='.fit-') as temporary:
-        staged=Path(temporary)/target.name
-        np.savez_compressed(staged,mean=scaler.mean_.astype(np.float64),scale=scaler.scale_.astype(np.float64),coef=lr.coef_[0].astype(np.float64),intercept=lr.intercept_.astype(np.float64),classes=lr.classes_,metadata=np.asarray(json.dumps(spec)))
+    with tempfile.TemporaryDirectory(dir=source, prefix='.fit-') as temporary:
+        staged = Path(temporary)/target.name
+        np.savez_compressed(staged, mean=scaler.mean_.astype(np.float64), scale=scaler.scale_.astype(np.float64),
+            coef=lr.coef_[0].astype(np.float64), intercept=lr.intercept_.astype(np.float64),
+            classes=lr.classes_, metadata=np.asarray(json.dumps(spec)))
         staged.replace(target)
-    from .bootstrap import SOURCE_NAME
-    write_json(source/'classifier_manifest.json',{'format':'router_source_v1','files':{
-        SOURCE_NAME:sha256(source/SOURCE_NAME),'region_logreg.npz':sha256(target)},'model':spec})
-    # Evaluate the exact safe numeric source representation without touching
-    # runtime/. Optional conversion is a separate, transactional operation.
+    write_json(source/'classifier_manifest.json', {'format':'router_source_v1', 'files':{
+        SOURCE_NAME:sha256(source/SOURCE_NAME), 'region_logreg.npz':sha256(target)}, 'model':spec})
     from .conversion import load_source_classifier, score_numeric
-    values,restored_spec,_=load_source_classifier(base)
-    all_p=score_numeric(values,restored_spec,features)
-    reference=model.predict_proba(subset(features,representation))[:,1]
-    parity=float(np.max(np.abs(all_p-reference)))
-    if parity>1e-10:raise AssertionError('Numeric model differs from trained logistic regression')
-    holdout=metrics(y[held],all_p[held]);holdout['n_studies']=len(set(groups[held]))
-    study_correct=[bool(np.all((all_p[held][groups[held]==g]>=.5).astype(int)==y[held][groups[held]==g])) for g in sorted(set(groups[held]))]
-    holdout['studies_all_images_correct']=sum(study_correct)
-    from scipy.stats import beta
-    image_successes=int(round(holdout['accuracy']*len(held)))
-    study_successes=sum(study_correct)
-    holdout['exact_95pct_lower_bound_images_ignoring_clustering']=float(beta.ppf(.025,image_successes,len(held)-image_successes+1)) if image_successes else 0.0
-    holdout['exact_95pct_lower_bound_all_correct_studies']=float(beta.ppf(.025,study_successes,len(study_correct)-study_successes+1)) if study_successes else 0.0
-    report={'protocol':split['protocol'],'grouping':'study_id; patient identity unavailable after anonymization',
-        'n_images':len(rows),'development_images':len(dev),'development_studies':len(set(groups[dev])),
-        'holdout_images':len(held),'holdout_studies':len(set(groups[held])),
-        'selected':{k:selection[k] for k in ['representation','C','selected_without_holdout']},
-        'development':selected['metrics'],'development_candidates':comparisons,'holdout':holdout,
-        'training_recipe_sha256':recipe_fingerprint(),'numeric_conversion_max_error':parity,'holdout_errors':[ids[i] for i in held if int(all_p[i]>=.5)!=y[i]],
-        'prohibited_features':['filename','path','DICOM fields','native dimensions/aspect ratio','laterality','quality labels'],
-        'fit_image_ids':spec['train_image_ids'],'held_out_image_ids':spec['holdout_image_ids'],
-        'checkpoint_dir':str(base),'seconds':time.perf_counter()-started,'converted':False,
-        'limitations':['Same acquisition source; no independent institution validation','Study-disjoint only; patient independence cannot be established','Only two known anatomy classes; confidence is not an OOD detector','Perfect finite holdout accuracy is not a guarantee on future images']}
-    write_json(output/'metrics.json',report)
-    write_json(output/'holdout_predictions.json',[{'image_id':ids[i],'study_id':groups[i],'true_region':'lumbar_spine' if y[i] else 'hip','predicted_region':'lumbar_spine' if all_p[i]>=.5 else 'hip','p_lumbar_spine':float(all_p[i]),'confidence':float(max(all_p[i],1-all_p[i]))} for i in held])
-    write_json(base/'training_report.json',report)
-    progress.update('holdout',f"Accuracy={holdout['accuracy']:.6f}, F1={holdout['macro_f1']:.6f}",len(held),len(held))
+    values, restored, _ = load_source_classifier(base)
+    probability = score_numeric(values, restored, features)
+    parity = float(np.max(np.abs(probability-model.predict_proba(subset(features, representation))[:,1])))
+    if parity > 1e-10:
+        raise AssertionError('Numeric region model differs from its source LR')
+    report = {'protocol':'Fixed recipe; final fit on all255 region labels; validation performed separately by grouped CV',
+        'grouping':'study_id; patient identity unavailable after anonymization',
+        'n_images':len(rows), 'fit_image_ids':ids, 'held_out_image_ids':[],
+        'selected':{'representation':representation, 'C':final_c, 'parameter_search':False},
+        'fit_scope':'all_available_labels', 'independent_final_checkpoint_validation':False,
+        'holdout':None, 'validation_command':spec['validation_command'],
+        'training_recipe_sha256':recipe_fingerprint(), 'numeric_conversion_max_error':parity,
+        'checkpoint_dir':str(base), 'seconds':time.perf_counter()-started, 'converted':False,
+        'limitations':['Final all-data model has no independent local holdout',
+                       'Use separately trained excluded-fold models for validation',
+                       'Frozen recipe was previously developed on this dataset; CV is not a sealed final test']}
+    write_json(base/'outputs/metrics.json', report)
+    write_json(base/'training_report.json', report)
+    progress.update('train', 'All-data region classifier saved; validation scores are separate', 1, 1)
     if convert:
         from .conversion import convert_all
-        report['conversion']=convert_all(base,data=data,verbose=verbose,ci=ci)
-        report['converted']=True
-        write_json(base/'training_report.json',report)
-        write_json(output/'metrics.json',report)
+        report['conversion'] = convert_all(base, data=data, verbose=verbose, ci=ci)
+        report['converted'] = True
+        write_json(base/'training_report.json', report)
+        write_json(base/'outputs/metrics.json', report)
     return report

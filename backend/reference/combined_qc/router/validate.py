@@ -363,10 +363,10 @@ def run(*, output=None, ci=False):
         "exception_count": len(errors), "errors": errors,
         "model_handle_identity_preserved": _identity(qc) == frozen_identity,
         "onnx_session_count": sum(len(sessions) for sessions in frozen_identity["sessions"].values()),
-        "numeric_classifier_count": 3, "model_identities": frozen_identity,
+        "numeric_classifier_count": 5, "model_identities": frozen_identity,
         "input_model_provenance": input_model_provenance,
         "checks": checks, "per_image": items, "seconds": time.perf_counter() - started,
-        "limitations": ["This mixes training and held-out anatomy images; it is an integration consistency check",
+        "limitations": ["Final classifiers use all available labels; this is an integration consistency check, not independent validation",
                         "No independent F1/AUC for quality subtasks is estimated by these full-inference predictions"],
     }
     write_json(output, report)

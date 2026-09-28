@@ -21,7 +21,8 @@ class RecordedSession:
 
     def run(self, outputs, inputs):
         self.inputs.append({name: value.copy() for name, value in inputs.items()})
-        return [np.asarray([.2], dtype=np.float32)]
+        count = len(inputs["gray_u8"])
+        return [np.zeros((count, n), dtype=np.float32) for n in (512, 2048, 6400)]
 
 
 class AutomaticHipLateralityTests(unittest.TestCase):
@@ -43,13 +44,13 @@ class AutomaticHipLateralityTests(unittest.TestCase):
             "geometry_feature_names": [f"pixel_{i}" for i in range(8)],
             "acquisition_feature_names": [f"acquisition_{i}" for i in range(7)],
         }
-        self.handle.mean = np.zeros(3, dtype=np.float32)
-        self.handle.std = np.ones(3, dtype=np.float32)
-        self.handle.inventory = {
-            "positioning_rotation": [{"fold": 0, "file": "position.onnx", "threshold": .5}],
-            "roi": [{"fold": 0, "file": "roi.onnx", "threshold": .5}],
+        self.handle.encoder = RecordedSession()
+        self.handle.sessions = {"resnet18_quality_features.onnx": self.handle.encoder}
+        self.handle.classifiers = {
+            task: {"mean": np.zeros(n), "scale": np.ones(n),
+                   "coef": np.zeros((1, n)), "intercept": np.asarray([-1.]), "threshold": .5}
+            for task, n in (("positioning_rotation", 6400), ("roi", 519))
         }
-        self.handle.sessions = {name: RecordedSession() for name in ("position.onnx", "roi.onnx")}
         self.handle.laterality_model = self.side_model
         self.handle.provenance = {"test_quality_model": True}
         self.handle.predict_prepared = MagicMock(wraps=self.handle.predict_prepared)
@@ -98,18 +99,20 @@ class AutomaticHipLateralityTests(unittest.TestCase):
         self.side_model.predict_array.return_value = self._prediction("right_hip")
         result = pipeline.infer(self.path, model=self.handle)
         prepared, _ = letterbox(self.native)
-        positioning = self.handle.sessions["position.onnx"].inputs[0]["pixels"][0, 0]
-        roi = self.handle.sessions["roi.onnx"].inputs[0]["pixels"][0, 0]
-        np.testing.assert_array_equal(positioning, prepared[:, ::-1])
-        np.testing.assert_array_equal(roi, prepared)
+        views = self.handle.encoder.inputs[0]["gray_u8"]
+        np.testing.assert_array_equal(views[0], np.rint(prepared * 255).astype(np.uint8))
+        np.testing.assert_array_equal(views[1], np.rint(prepared[:, ::-1] * 255).astype(np.uint8))
+        self.assertEqual(len(self.handle.sessions), 1)
+        self.assertEqual(len(views), 2)
         self.assertTrue(result["geometry"]["positioning_mirrored"])
         self.assertEqual(self.handle.predict_prepared.call_args.args[2], "right_hip")
 
     def test_automatic_left_side_keeps_positioning_orientation(self):
         result = pipeline.infer(self.path, model=self.handle)
         prepared, _ = letterbox(self.native)
-        positioning = self.handle.sessions["position.onnx"].inputs[0]["pixels"][0, 0]
-        np.testing.assert_array_equal(positioning, prepared)
+        views = self.handle.encoder.inputs[0]["gray_u8"]
+        self.assertEqual(len(views), 1)
+        np.testing.assert_array_equal(views[0], np.rint(prepared * 255).astype(np.uint8))
         self.assertFalse(result["geometry"]["positioning_mirrored"])
 
     def test_known_manifest_side_never_overrides_classifier_prediction(self):

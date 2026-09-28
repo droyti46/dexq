@@ -49,7 +49,9 @@ class LateralityClassifier:
                            "backbone_sha256": manifest["files"]["resnet18_features.onnx"],
                            "n_fit_images": len(spec["train_image_ids"]),
                            "trained_on_holdout": spec["trained_on_holdout"],
-                           "representation": spec["representation"]}
+                           "representation": spec["representation"],
+                           "fit_scope": spec.get("fit_scope", "development_only"),
+                           "independent_final_checkpoint_validation": spec.get("independent_final_checkpoint_validation", True)}
         progress.update("load", "Orientation-preserving ResNet18 ONNX loaded", 2, 2)
 
     def score_features(self, features):

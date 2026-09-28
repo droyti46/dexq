@@ -1,4 +1,4 @@
-"""Select features on development studies, fit one LR, evaluate sealed holdout."""
+"""Fit one fixed hip-side LR on all155 labels; grouped validation is separate."""
 import json
 from pathlib import Path
 import shutil
@@ -145,85 +145,60 @@ def _train(data, *, base, verbose, ci, resume, convert, target_runtime_dir):
         write_json(report_path,report)
         return report
     started = time.perf_counter()
-    ids = [row["image_id"] for row in rows]
-    if (set(split["development_image_ids"]) & set(split["holdout_image_ids"])
-            or set(ids) != set(split["development_image_ids"]) | set(split["holdout_image_ids"])):
-        raise ValueError("Invalid laterality split membership")
-    groups = np.asarray([row["study_id"] for row in rows])
-    y = np.asarray([int(row["anatomical_region"] == "right_hip") for row in rows])
-    dev = np.asarray([i for i, image_id in enumerate(ids) if image_id in set(split["development_image_ids"])])
-    held = np.asarray([i for i, image_id in enumerate(ids) if image_id in set(split["holdout_image_ids"])])
-    if set(groups[dev]) & set(groups[held]):
-        raise ValueError("Development and holdout studies intersect")
+    ids = [row['image_id'] for row in rows]
+    y = np.asarray([int(row['anatomical_region'] == 'right_hip') for row in rows])
     backbone = prepare_backbone(base, verbose=verbose, ci=ci)
     x, fingerprint = _feature_cache(rows, data, backbone, base, progress)
-    outer = list(StratifiedGroupKFold(5, shuffle=True, random_state=SEED).split(x[dev], y[dev], groups[dev]))
-    comparisons = []
-    for representation in REPRESENTATIONS:
-        probability = np.full(len(dev), np.nan)
-        fold_reports = []
-        for fold, (train, val) in enumerate(outer):
-            if set(groups[dev[train]]) & set(groups[dev[val]]):
-                raise ValueError("Study leakage in development folds")
-            c, candidates = choose_c(x[dev[train]], y[dev[train]], groups[dev[train]], representation)
-            model = fit(subset(x[dev[train]], representation), y[dev[train]], c)
-            probability[val] = model.predict_proba(subset(x[dev[val]], representation))[:, 1]
-            fold_reports.append({"fold": fold, "C": c, "train_studies": sorted(set(groups[dev[train]])),
-                                 "validation_studies": sorted(set(groups[dev[val]])), "metrics": metrics(y[dev[val]], probability[val]), "inner_selection": candidates})
-            progress.update("development", f"{representation}: fold {fold + 1}", fold + 1, 5)
-        comparisons.append({"representation": representation, "metrics": metrics(y[dev], probability), "folds": fold_reports,
-                            "oof_probabilities_right": probability.tolist(), "oof_error_ids": [ids[dev[i]] for i in np.flatnonzero((probability >= .5).astype(int) != y[dev])]})
-    selected = max(comparisons, key=lambda item: (item["metrics"]["macro_f1"], item["metrics"]["balanced_accuracy"], item["metrics"]["roc_auc_right"], -REPRESENTATIONS[item["representation"]]))
-    representation = selected["representation"]
-    c, inner = choose_c(x[dev], y[dev], groups[dev], representation)
-    selection = {"representation": representation, "C": c, "selected_without_holdout": True,
-                 "split_sha256": sha256(ROOT / "split.json"), "candidates": comparisons, "final_inner_cv": inner}
-    write_json(base / "outputs/selection_before_holdout.json", selection)
-    model = fit(subset(x[dev], representation), y[dev], c)
-    scaler, lr = model.named_steps["standardscaler"], model.named_steps["logisticregression"]
-    spec = {"format": "image_only_laterality_logreg_v1", "class_names": ["left_hip", "right_hip"],
-            "representation": representation, "n_features": REPRESENTATIONS[representation], "C": c, "seed": SEED,
-            "threshold": .5, "review_threshold": .9, "mirror_average": False, "preprocessing": PREPROCESSING,
-            "backbone_sha256": sha256(backbone), "ImageNet_state_sha256": RESNET_STATE_SHA, "training_recipe_sha256": recipe,
-            "backbone_export_recipe_sha256": export_recipe_sha256(),
-            "feature_cache_metadata_sha256": sha256(base/'features.json'), "feature_cache_sha256": sha256(base/'features.npz'),
-            "manifest_sha256": split["manifest_sha256"], "split_sha256": sha256(ROOT / "split.json"),
-            "train_image_ids": [ids[i] for i in dev], "holdout_image_ids": [ids[i] for i in held], "trained_on_holdout": False,
-            "source_files_sha256": fingerprint["source_files_sha256"],
-            "label_status": "153 provisional_visual and 2 filename_reference; not verified patient laterality"}
-    source_model = base / "laterality_logreg.npz"
-    with tempfile.TemporaryDirectory(dir=base,prefix='.fit-') as temporary:
-        staged=Path(temporary)/source_model.name
-        np.savez_compressed(staged,mean=scaler.mean_.astype(np.float64),scale=scaler.scale_.astype(np.float64),coef=lr.coef_[0].astype(np.float64),intercept=lr.intercept_.astype(np.float64),classes=lr.classes_,metadata=np.asarray(json.dumps(spec)))
+    representation, c = 'spatial_2048', .1
+    progress.update('train', 'One final side LR: all155 labels, spatial2048, C=.1', 0, 1)
+    model = fit(subset(x, representation), y, c)
+    scaler, lr = model.named_steps['standardscaler'], model.named_steps['logisticregression']
+    spec = {'format':'image_only_laterality_logreg_v1', 'class_names':['left_hip','right_hip'],
+        'representation':representation, 'n_features':2048, 'C':c, 'seed':SEED,
+        'threshold':.5, 'review_threshold':.9, 'mirror_average':False, 'preprocessing':PREPROCESSING,
+        'backbone_sha256':sha256(backbone), 'ImageNet_state_sha256':RESNET_STATE_SHA,
+        'training_recipe_sha256':recipe, 'backbone_export_recipe_sha256':export_recipe_sha256(),
+        'feature_cache_metadata_sha256':sha256(base/'features.json'),
+        'feature_cache_sha256':sha256(base/'features.npz'),
+        'manifest_sha256':sha256(data/'manifest.jsonl'), 'split_sha256':sha256(ROOT/'split.json'),
+        'train_image_ids':ids, 'holdout_image_ids':[], 'trained_on_holdout':None,
+        'fit_scope':'all_available_labels', 'independent_final_checkpoint_validation':False,
+        'historical_holdout_included_in_final_fit':True,
+        'validation_command':'python -m combined_qc.validate',
+        'source_files_sha256':fingerprint['source_files_sha256'],
+        'label_status':'153 provisional_visual and2 filename_reference; not verified patient laterality'}
+    source_model = base/'laterality_logreg.npz'
+    with tempfile.TemporaryDirectory(dir=base, prefix='.fit-') as temporary:
+        staged = Path(temporary)/source_model.name
+        np.savez_compressed(staged, mean=scaler.mean_.astype(np.float64), scale=scaler.scale_.astype(np.float64),
+            coef=lr.coef_[0].astype(np.float64), intercept=lr.intercept_.astype(np.float64),
+            classes=lr.classes_, metadata=np.asarray(json.dumps(spec)))
         staged.replace(source_model)
-    write_json(base/'classifier_manifest.json',{'format':'hip_laterality_source_v1','files':{
-        SOURCE_NAME:sha256(base/SOURCE_NAME),'laterality_logreg.npz':sha256(source_model)},'model':spec})
+    write_json(base/'classifier_manifest.json', {'format':'hip_laterality_source_v1', 'files':{
+        SOURCE_NAME:sha256(base/SOURCE_NAME), 'laterality_logreg.npz':sha256(source_model)}, 'model':spec})
     from .conversion import load_source_classifier, score_numeric
-    values,restored_spec,_=load_source_classifier(base)
-    probability=score_numeric(values,restored_spec,x)
-    conversion_error=float(np.max(np.abs(probability-model.predict_proba(subset(x,representation))[:,1])))
-    if conversion_error>1e-10:raise AssertionError('Numeric laterality source differs from trained LR')
-    report = {"protocol": "Inherited sealed study-disjoint split; nested 5 outer/3 inner development folds; one final classifier",
-              "label_interpretation": "Agreement with provisional dataset visual side labels, not independently verified patient anatomy",
-              "development_images": len(dev), "development_studies": len(set(groups[dev])),
-              "holdout_images": len(held), "holdout_studies": len(set(groups[held])),
-              "selected": {key: selection[key] for key in ("representation", "C", "selected_without_holdout")},
-              "development": selected["metrics"], "candidates": comparisons, "holdout": metrics(y[held], probability[held]),
-              "holdout_error_ids": [ids[i] for i in held if int(probability[i] >= .5) != y[i]],
-              "numeric_conversion_max_error": conversion_error, "training_recipe_sha256": recipe,
-              "fit_image_ids": spec["train_image_ids"], "held_out_image_ids": spec["holdout_image_ids"],
-              "prohibited_features": ["path", "filename", "DICOM fields", "native dimensions", "side labels as input", "quality labels"],
-              "mirror_average": False, "seconds": time.perf_counter() - started,
-              "source_dir": str(base), "converted": False,
-              "limitations": ["Same DXA acquisition source", "Patient-independent splitting unavailable", "Anatomical side labels have not been independently verified", "Assumes a hip image; only two known side classes"]}
+    values, restored, _ = load_source_classifier(base)
+    probability = score_numeric(values, restored, x)
+    error = float(np.max(np.abs(probability-model.predict_proba(subset(x, representation))[:,1])))
+    if error > 1e-10:
+        raise AssertionError('Numeric side model differs from its source LR')
+    report = {'protocol':'Fixed recipe; final fit on all155 side labels; grouped validation runs separately',
+        'label_interpretation':'Agreement with provisional visual side labels, not independently verified patient anatomy',
+        'fit_image_ids':ids, 'held_out_image_ids':[], 'fit_scope':'all_available_labels',
+        'selected':{'representation':representation, 'C':c, 'parameter_search':False},
+        'holdout':None, 'independent_final_checkpoint_validation':False,
+        'validation_command':spec['validation_command'], 'numeric_conversion_max_error':error,
+        'training_recipe_sha256':recipe, 'mirror_average':False,
+        'seconds':time.perf_counter()-started, 'source_dir':str(base), 'converted':False,
+        'limitations':['Final all-data weights have no independent local holdout',
+                       'Use temporary excluded-fold models for validation', 'Physical patient side is unverified']}
     write_json(report_path, report)
-    write_json(base / "outputs/metrics.json", report)
-    write_json(base / "outputs/holdout_predictions.json", [{"image_id": ids[i], "study_id": groups[i], "true_dataset_side": rows[i]["anatomical_region"], "predicted_side": "right_hip" if probability[i] >= .5 else "left_hip", "p_right_hip": float(probability[i]), "confidence": float(max(probability[i], 1 - probability[i]))} for i in held])
-    progress.update("holdout", f"Accuracy={report['holdout']['accuracy']:.6f}, macro F1={report['holdout']['macro_f1']:.6f}", len(held), len(held))
+    write_json(base/'outputs/metrics.json', report)
+    progress.update('train', 'All-data side classifier saved; validation scores are separate', 1, 1)
     if convert:
         from .conversion import export_runtime
-        report['conversion']=export_runtime(base,target_runtime_dir,data=data,verbose=verbose,ci=ci)
-        report['converted']=True
-        write_json(report_path,report)
-        write_json(base/'outputs/metrics.json',report)
+        report['conversion'] = export_runtime(base, target_runtime_dir, data=data, verbose=verbose, ci=ci)
+        report['converted'] = True
+        write_json(report_path, report)
+        write_json(base/'outputs/metrics.json', report)
     return report

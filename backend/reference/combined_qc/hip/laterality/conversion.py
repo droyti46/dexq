@@ -41,7 +41,11 @@ def load_source_classifier(source_dir=None):
     if (spec.get('preprocessing') != PREPROCESSING or spec.get('threshold') != .5
             or spec.get('review_threshold') != .9 or spec.get('mirror_average') is not False
             or spec.get('ImageNet_state_sha256') != RESNET_STATE_SHA
-            or spec.get('trained_on_holdout') is not False
+            or not ((spec.get('fit_scope') == 'all_available_labels'
+                     and spec.get('trained_on_holdout') is None
+                     and spec.get('holdout_image_ids') == []
+                     and spec.get('independent_final_checkpoint_validation') is False)
+                    or (spec.get('fit_scope') is None and spec.get('trained_on_holdout') is False))
             or set(spec.get('train_image_ids', [])) & set(spec.get('holdout_image_ids', []))):
         raise ValueError('Invalid laterality source recipe or split')
     return values, spec, manifest

@@ -119,6 +119,36 @@ def test_four_uploads_are_processed_without_silent_truncation() -> None:
     assert response.json()["failed"] == 4  # Синтетический кадр не даёт двух точек.
 
 
+def test_empty_batch_upload_keeps_failure_row_and_csv() -> None:
+    files = [("files", ("empty.dcm", b"", "application/dicom"))]
+    response = client.post("/api/v1/analyses/batch", files=files)
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 1
+    assert response.json()["failed"] == 1
+    assert response.json()["items"][0]["result"]["processing_status"] == "Failure"
+    csv_response = client.post("/api/v1/analyses/batch.csv", files=files)
+    assert csv_response.status_code == 200
+    assert csv_response.text.count("Failure") == 1
+
+
+def test_empty_upload_among_other_files_preserves_order() -> None:
+    response = client.post(
+        "/api/v1/analyses/batch",
+        files=[
+            ("files", ("first.dcm", b"invalid", "application/dicom")),
+            ("files", ("empty.dcm", b"", "application/dicom")),
+            ("files", ("last.dcm", b"invalid", "application/dicom")),
+        ],
+    )
+    assert response.status_code == 200
+    assert [item["filename"] for item in response.json()["items"]] == [
+        "first.dcm",
+        "empty.dcm",
+        "last.dcm",
+    ]
+    assert response.json()["failed"] == 3
+
+
 def test_batch_keeps_uploaded_order_when_one_image_is_too_large() -> None:
     old_limit = app.state.max_upload_bytes
     app.state.max_upload_bytes = 100_000
@@ -135,8 +165,83 @@ def test_batch_keeps_uploaded_order_when_one_image_is_too_large() -> None:
         app.state.max_upload_bytes = old_limit
     assert response.status_code == 200
     assert [item["filename"] for item in response.json()["items"]] == [
-        "first.dcm", "too-large.dcm", "last.dcm"
+        "first.dcm",
+        "too-large.dcm",
+        "last.dcm",
     ]
+
+
+def test_batch_json_omits_patient_name_from_uploaded_filename() -> None:
+    response = client.post(
+        "/api/v1/analyses/batch",
+        files=[("files", ("C:/patients/SECRET_PERSON/study.dcm", b"invalid", "application/dicom"))],
+    )
+    assert response.status_code == 200
+    assert response.json()["items"][0]["filename"] == "study.dcm"
+    assert "SECRET_PERSON" not in response.text
+
+
+def test_batch_releases_each_upload_before_reading_next() -> None:
+    payload = make_dicom()
+
+    class TrackingFile:
+        def __init__(self, name: str) -> None:
+            self.filename = name
+            self.calls = 0
+
+        async def read(self, limit: int) -> bytes:
+            self.calls += 1
+            if self.filename == "second.dcm":
+                assert first.calls == 1
+                assert processed == ["first.dcm"]
+            return payload
+
+    first = TrackingFile("first.dcm")
+    second = TrackingFile("second.dcm")
+    processed: list[str] = []
+
+    class TrackingAnalyzer:
+        def analyze(self, content: bytes, filename: str, region: object) -> object:
+            processed.append(filename)
+            return app.state.analyzer.analyze(content, filename, region)
+
+    from app.api import analyze_batch
+
+    class Request:
+        def __init__(self) -> None:
+            self.app = type("App", (), {"state": type("State", (), {
+                "analyzer": TrackingAnalyzer(), "max_upload_bytes": 100_000
+            })()})()
+
+    import asyncio
+
+    asyncio.run(analyze_batch(Request(), [first, second]))
+    assert processed == ["first.dcm", "second.dcm"]
+
+
+def test_archive_endpoint_analyzes_before_reading_next_member(monkeypatch) -> None:
+    import app.api as api
+
+    processed: list[str] = []
+    original_analyze = app.state.analyzer.analyze
+
+    def record_analysis(content: bytes, filename: str, region: object) -> object:
+        processed.append(filename)
+        return original_analyze(content, filename, region)
+
+    def images(_content: bytes, _limit: int):
+        yield "one.dcm", b"invalid"
+        assert processed == ["one.dcm"]
+        yield "two.dcm", b"invalid"
+
+    monkeypatch.setattr(api, "iter_archive", images)
+    monkeypatch.setattr(app.state.analyzer, "analyze", record_analysis)
+    response = client.post(
+        "/api/v1/analyses/archive",
+        files={"archive": ("study.zip", b"placeholder", "application/zip")},
+    )
+    assert response.status_code == 200
+    assert [item["filename"] for item in response.json()["items"]] == ["one.dcm", "two.dcm"]
 
 
 def test_archive_json_keeps_results_for_browser() -> None:
@@ -150,6 +255,20 @@ def test_archive_json_keeps_results_for_browser() -> None:
     assert response.status_code == 200
     assert len(response.json()["items"]) == 1
     assert response.json()["failed"] == 1
+
+
+def test_archive_json_omits_patient_path_but_csv_preserves_relative_path() -> None:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("SECRET_PERSON/study.dcm", b"not dicom")
+    kwargs = {"files": {"archive": ("study.zip", buffer.getvalue(), "application/zip")}}
+    response = client.post("/api/v1/analyses/archive", **kwargs)
+    assert response.status_code == 200
+    assert response.json()["items"][0]["filename"] == "study.dcm"
+    assert "SECRET_PERSON" not in response.text
+    csv_response = client.post("/api/v1/analyses/archive.csv", **kwargs)
+    assert csv_response.status_code == 200
+    assert "SECRET_PERSON/study.dcm" in csv_response.text
 
 
 def test_archive_keeps_two_hundred_failure_rows() -> None:

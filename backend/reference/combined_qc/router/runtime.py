@@ -39,7 +39,9 @@ class RegionClassifier:
         progress.update('load','Frozen ImageNet ONNX loaded',2,2)
         self.provenance={'classifier_sha256':manifest['files']['region_logreg.npz'],
             'backbone_sha256':manifest['files']['resnet18_features.onnx'],'n_fit_images':len(meta['train_image_ids']),
-            'fitted_on_holdout':meta['trained_on_holdout'],'representation':meta['representation']}
+            'fitted_on_holdout':meta['trained_on_holdout'],'representation':meta['representation'],
+            'fit_scope':meta.get('fit_scope','development_only'),
+            'independent_final_checkpoint_validation':meta.get('independent_final_checkpoint_validation',True)}
 
     def score_features(self, features):
         features=np.asarray(features)

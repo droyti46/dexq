@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import stat
+from collections.abc import Iterable, Iterator
 from io import BytesIO, StringIO
 from pathlib import Path, PurePosixPath
 from zipfile import BadZipFile, ZipFile
@@ -16,18 +17,15 @@ MAX_ARCHIVE_FILES = 200
 MAX_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
 
 
-def read_archive(content: bytes, max_file_bytes: int) -> list[tuple[str, bytes]]:
-    """Читает подходящие файлы ZIP в памяти с защитой от zip bomb.
-
-    Архив никогда не распаковывается на диск, поэтому пути внутри него не могут
-    выйти за рабочую директорию приложения.
+def iter_archive(content: bytes, max_file_bytes: int) -> Iterator[tuple[str, bytes]]:
+    """Проверяет ZIP и выдаёт изображения по одному без распаковки на диск.
 
     Args:
         content: Полное содержимое ZIP-архива.
         max_file_bytes: Максимальный допустимый размер одного файла после распаковки.
 
-    Returns:
-        Список пар «путь внутри архива — содержимое».
+    Yields:
+        Путь внутри архива и байты одного изображения.
 
     Raises:
         ValueError: Если архив повреждён, зашифрован или превышает ограничения.
@@ -82,21 +80,38 @@ def read_archive(content: bytes, max_file_bytes: int) -> list[tuple[str, bytes]]
                 )
             if sum(info.file_size for info in candidates) > MAX_UNCOMPRESSED_BYTES:
                 raise ValueError("Распакованный архив превышает ограничение 2 ГБ")
-            return [(info.filename, archive.read(info)) for info in candidates]
+            for info in candidates:
+                yield info.filename, archive.read(info)
     except BadZipFile as error:
         raise ValueError("Не удалось прочитать ZIP-архив") from error
 
 
+def read_archive(content: bytes, max_file_bytes: int) -> list[tuple[str, bytes]]:
+    """Возвращает изображения ZIP для локального CLI в виде списка.
+
+    Args:
+        content: Полное содержимое ZIP-архива.
+        max_file_bytes: Максимальный допустимый размер одного изображения.
+
+    Returns:
+        Список пар «путь внутри архива — содержимое».
+
+    Raises:
+        ValueError: Если ZIP повреждён или не проходит проверки.
+    """
+    return list(iter_archive(content, max_file_bytes))
+
+
 def analyze_items(
     analyzer: Analyzer,
-    items: list[tuple[str, bytes]],
+    items: Iterable[tuple[str, bytes]],
     region: AnatomicalRegion,
 ) -> BatchResult:
     """Обрабатывает элементы независимо и сохраняет ошибки в отчёте.
 
     Args:
         analyzer: Настроенный оркестратор проверок.
-        items: Имена и байты входных изображений.
+        items: Последовательность имён и байтов входных изображений.
         region: Автоопределение или выбор оператора для всего пакета.
 
     Returns:
@@ -104,19 +119,27 @@ def analyze_items(
     """
     results: list[BatchItem] = []
     for filename, content in items:
+        safe_name = Path(filename.replace("\\", "/")).name or "study.dcm"
         try:
             result = analyzer.analyze(content, filename, region)
             if result.processing_status == "Failure":
                 results.append(
                     BatchItem(
-                        filename=filename, result=result, error=result.error or "Анализ не завершён"
+                        filename=safe_name,
+                        input_path=filename,
+                        result=result,
+                        error=result.error or "Анализ не завершён",
                     )
                 )
             else:
-                results.append(BatchItem(filename=filename, result=result))
+                results.append(BatchItem(filename=safe_name, input_path=filename, result=result))
         except (ValueError, OSError, RuntimeError):
             results.append(
-                BatchItem(filename=filename, error="Не удалось безопасно обработать файл")
+                BatchItem(
+                    filename=safe_name,
+                    input_path=filename,
+                    error="Не удалось безопасно обработать файл",
+                )
             )
     successful = sum(
         item.result is not None and item.result.processing_status == "Success" for item in results
@@ -150,7 +173,7 @@ def render_csv(batch: BatchResult) -> str:
         result = item.result
         writer.writerow(
             {
-                "path_to_study": item.filename,
+                "path_to_study": item.input_path or item.filename,
                 "study_uid": result.study_uid if result else "",
                 "image_uid": result.image_uid if result else "",
                 "anatomical_region": result.anatomical_region if result else "unknown",

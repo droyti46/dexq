@@ -6,7 +6,7 @@
 
 ## Требования и источник
 
-Python 3.12 для подготовки весов, Docker Engine с Compose для контейнеров и локальный финальный архив `dxa_qc_with_models.zip` с SHA-256 `2cd75f3777a4a7735d8e36cca371d4637b54053fb9283863c64c7214535a8867`. Другие hip-веса не используются. Из архива извлекаются 34 runtime-файла (≈1.36 GB) в `backend/models/reference/`; исходный архив и веса не входят в Git и Docker build context. Директория монтируется только для чтения по `/models/reference`. Образ backend содержит исходный `combined_qc` без изменения байтов, но не содержит весов/изображений.
+Python 3.12 для подготовки весов, Docker Engine с Compose для контейнеров и локальный оптимизированный архив `dxa_qc_with_models (2).zip` с SHA-256 `b92ed6e89b1bb54358b1e06681842dbecac006880cf9062ea68980673ff12f0a`. Другие hip-веса не используются. Из архива извлекаются 22 runtime-файла (276 423 364 байта, ≈264 MiB, включая JSON-манифесты) в `backend/models/reference/`; исходный архив и веса не входят в Git и Docker build context. Директория монтируется только для чтения по `/models/reference`. Образ backend содержит 74 Python-файла `combined_qc`, совпадающих с архивом побайтово, но не содержит весов/изображений.
 
 Базовые образы привязаны к multiarch digest:
 
@@ -23,10 +23,10 @@ Backend-зависимости зафиксированы в `backend/requiremen
 Из корня распакованного исходного кода, имея локальный архив с весами:
 
 ```bash
-PYTHONPATH=backend python3.12 scripts/prepare_reference.py /local/path/dxa_qc_with_models.zip --source backend/reference --models backend/models/reference
+PYTHONPATH=backend python3.12 scripts/prepare_reference.py "/local/path/dxa_qc_with_models (2).zip" --source backend/reference --models backend/models/reference
 ```
 
-Запустите команду из `backend/` как `python3.12 ../scripts/prepare_reference.py /local/path/dxa_qc_with_models.zip`: CLI-обёртка использует пакет `app` из текущего Python-окружения. При запуске из корня проекта установите `PYTHONPATH=backend`. Установите backend-зависимости до извлечения, если среда ещё не подготовлена.
+Запустите команду из `backend/` как `python3.12 ../scripts/prepare_reference.py "/local/path/dxa_qc_with_models (2).zip"`: CLI-обёртка использует пакет `app` из текущего Python-окружения. При запуске из корня проекта установите `PYTHONPATH=backend`. Установите backend-зависимости до извлечения, если среда ещё не подготовлена.
 
 ```bash
 PYTHON=python3.12 ./scripts/run.sh
@@ -39,7 +39,7 @@ PYTHON=python3.12 ./scripts/run.sh
 ```text
 submission/
   source/                       исходники и конфигурация без медицинских данных
-  models/reference/             все 34 локальных runtime-файла + installed-manifest.json
+  models/reference/             все 22 локальных runtime-файла + installed-manifest.json
   images/                       заранее собранные сохранённые Docker-образы для офлайн-хоста
   source/scripts/run.sh         локальная точка запуска и проверка SHA
 ```
@@ -48,4 +48,4 @@ submission/
 
 ## Ресурсы и время
 
-Полный локальный замер Windows 11 / Python 3.12.6 / Intel Core i7-1355U (12 логических потоков) / 15.63 GiB RAM / CPUExecutionProvider: **102 исследования, 255 нативных DICOM, по 1–3 файла**, автоматическая область, **255/255 `Success`**, максимум **11.4807 с/исследование**, среднее **4.2709 с/исследование** от начала чтения локальных файлов до готового CSV после прогрева; холодная загрузка моделей отдельно **5.6867 с**. Команда `python ../scripts/benchmark.py --source ../local-test-images/benchmark-corpus --models models/reference --output ../local-test-images/benchmark-all.json` выполнялась из `backend/`; одинаковые файлы из перекрывающихся папок классов дедуплицированы по SHA-256 и разложены по DICOM Study UID исключительно в игнорируемой локальной папке. На этой конфигурации и **этом development-наборе** все 102 исследования укладываются в `≤180 с`; обобщать результат на новые сканы, Linux/Docker или другой CPU нельзя. Веса занимают 1.26 GiB (≈1.36 GB), без образов, временных входов и памяти ONNX. Минимальная конфигурация CPU/RAM/disk не измерялась; проверенная **конфигурация данного опыта** — i7-1355U, 16 GB RAM, без GPU; для планирования рекомендуются не менее 16 GB RAM и запас диска сверх весов, но это не проверенный минимум. Docker startup/healthcheck в текущем окружении недоступен; локальная установка без Docker работает.
+Установленный runtime текущего архива содержит 22 файла (276 423 364 байта, ≈264 MiB); к месту на диске дополнительно нужны образы, временные входы и сама поставка. На локальном Windows 11 / Python 3.12.6 / CPUExecutionProvider с i7-1355U и 15.63 GiB RAM после удаления повторяющихся копий одного DICOM из экспертных папок и одного некорректного тестового файла получены 255 уникальных DICOM из 102 исследований (1–3 кадра): 255/255 `Success`, максимум **15.895 с/исследование**, среднее **4.262 с**, холодная загрузка **2.6479 с**. Измерение включает локальное чтение, декодирование, инференс, DTO и CSV при прогретом пайплайне, не включает HTTP-загрузку/браузер и не является проверкой точности на независимых пациентах. Критерий `≤180 с/исследование` пройден **только на этом development-наборе и этой машине**; минимальные аппаратные требования и свободная RAM под нагрузкой не измерены. Старый `local-test-images/benchmark-all.json` относится к прежнему архиву и не описывает текущие веса. Агрегированный результат нового замера сохранён только локально в игнорируемом Git `local-test-images/benchmark-optimized.json`; DICOM и UID не публикуются. Для повторения потребуется каталог с уникальными исследованиями, где 1–3 кадра на Study UID: `python ../scripts/benchmark.py --source ../local-test-images/benchmark-corpus --models models/reference --output ../local-test-images/benchmark-current.json` из `backend/`. Docker startup/healthcheck в текущем окружении не подтверждён.

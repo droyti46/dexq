@@ -117,8 +117,8 @@ class QCPipeline:
         """Train classifier, hip and spine using each module's existing recipe.
 
         Data is a mapping because hip/router and spine have different label
-        manifests. An integer epochs applies to hip; a mapping can set every
-        module explicitly (the frozen-backbone ML fits accept None or 1).
+        manifests. All backbones are frozen; every module accepts epochs=None or 1.
+        A mapping can set each module explicitly.
         Successful conversion invalidates that module's old in-memory handle;
         its next use loads the newly published checkpoint.
         """

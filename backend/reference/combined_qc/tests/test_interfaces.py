@@ -82,8 +82,30 @@ class InterfaceTests(unittest.TestCase):
         handle = HipONNXPredictor.__new__(HipONNXPredictor)
         class BadSession:
             def run(self, *args): return [np.array([float('nan')])]
-        handle.sessions = {'model.onnx': BadSession()}
-        with self.assertRaises(ValueError): handle._run('model.onnx', {})
+        handle.encoder = BadSession()
+        with self.assertRaises(ValueError):
+            handle.extract_prepared(np.zeros((1,320,320), dtype=np.uint8))
+
+    def test_invalid_pixels_and_fold_selection_rejected_before_model_execution(self):
+        pixels, geometry = letterbox(np.ones((261, 280), dtype=np.uint8))
+        handle = HipONNXPredictor.__new__(HipONNXPredictor)
+        handle.config = {"image_size": 320}
+        for bad in (np.full((320,320), np.nan), np.full((320,320), np.inf),
+                    np.full((320,320), 1.1), np.zeros((319,320))):
+            with self.assertRaises(ValueError):
+                handle.predict_prepared(bad, geometry, "left_hip")
+        with self.assertRaises(ValueError):
+            handle.predict_prepared(pixels, geometry, "left_hip", folds=[0])
+        bad = pixels.copy(); bad[0,0] = .2
+        with self.assertRaises(ValueError):
+            handle.predict_prepared(bad, geometry, "left_hip")
+
+    def test_numeric_hip_overflow_is_rejected(self):
+        from combined_qc.hip.runtime import score_numeric
+        model = {"mean": np.zeros(1), "scale": np.asarray([1.e-308]),
+                 "coef": np.ones((1,1)), "intercept": np.zeros(1)}
+        with self.assertRaises(ValueError):
+            score_numeric(np.asarray([[1.e308]]), model)
 
     def test_publish_failure_preserves_previous_runtime(self):
         with tempfile.TemporaryDirectory() as temp:

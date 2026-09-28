@@ -57,9 +57,21 @@ def test_more_than_three_images_of_study_are_processed() -> None:
     assert len(result.items) == 7
     assert result.successful == 7
     assert result.failed == 0
-    assert result.items[4].filename == "case/a4.dcm"
+    assert result.items[4].filename == "a4.dcm"
+    assert result.items[4].input_path == "case/a4.dcm"
+    assert "case/a4.dcm" in render_csv(result)
     assert result.items[4].result is not None
     assert result.items[-1].result is not None
+
+
+def test_batch_json_hides_archive_path_but_csv_keeps_relative_path() -> None:
+    batch = analyze_items(
+        StudyAnalyzer(), [("SECRET_PERSON/study.dcm", b"invalid")], AnatomicalRegion.AUTO
+    )
+    assert batch.items[0].filename == "study.dcm"
+    assert "SECRET_PERSON" not in batch.model_dump_json()
+    rows = list(csv.DictReader(StringIO(render_csv(batch).lstrip("﻿"))))
+    assert rows[0]["path_to_study"] == "SECRET_PERSON/study.dcm"
 
 
 def test_invalid_dicom_keeps_path_and_empty_uid_and_class() -> None:
@@ -95,6 +107,20 @@ def test_archive_keeps_all_supported_images_in_mixed_input() -> None:
         archive.writestr("study/two.png", b"not a valid PNG")
     items = read_archive(buffer.getvalue(), 1024 * 1024)
     assert [name for name, _ in items] == ["study/one.dcm", "study/two.png"]
+
+
+def test_archive_streams_one_member_at_a_time() -> None:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w") as archive:
+        archive.writestr("one.dcm", b"first")
+        archive.writestr("two.dcm", b"second")
+    from app.batch import iter_archive
+
+    images = iter_archive(buffer.getvalue(), 1024)
+    assert next(images) == ("one.dcm", b"first")
+    assert next(images) == ("two.dcm", b"second")
+    with pytest.raises(StopIteration):
+        next(images)
 
 
 def test_archive_rejects_more_than_two_hundred_images() -> None:

@@ -9,8 +9,8 @@ import stat
 from pathlib import Path, PurePosixPath
 from zipfile import BadZipFile, ZipFile, ZipInfo
 
-REFERENCE_SHA = "2cd75f3777a4a7735d8e36cca371d4637b54053fb9283863c64c7214535a8867"
-REFERENCE_MANIFEST_SHA = "7fb61cf6fa5cc47b07f2fdf738b1a31ad0bbb772c6c4d15527c7c91742e4a32b"
+REFERENCE_SHA = "b92ed6e89b1bb54358b1e06681842dbecac006880cf9062ea68980673ff12f0a"
+REFERENCE_MANIFEST_SHA = "fbb8363d86ee1e107d38bc32eeef994757db9032d60d5ed1ed7cd96026cc655d"
 PREFIX = "dxa_qc_code/combined_qc/"
 MODULES = ("router", "hip", "spine")
 MAX_MEMBER_BYTES = 1024 * 1024 * 1024
@@ -133,7 +133,7 @@ def prepare_reference(
     encoded = json.dumps({"reference_sha256": expected_zip_sha, "files": manifest}, indent=2)
     if manifest_path.exists() and manifest_path.read_text(encoding="utf-8") != encoded:
         raise ValueError("Existing model manifest differs from reference")
-    manifest_path.write_text(encoded, encoding="utf-8")
+    manifest_path.write_bytes(encoded.encode("utf-8"))
     return manifest
 
 
@@ -155,8 +155,9 @@ def verify_models(models_root: Path, *, expected_reference_sha: str = REFERENCE_
         raise ValueError("Model manifest is unavailable") from error
     if manifest.get("reference_sha256") != expected_reference_sha:
         raise ValueError("Model manifest reference SHA-256 mismatch")
+    normalized_manifest = manifest_bytes.replace(b"\r\n", b"\n")
     if expected_reference_sha == REFERENCE_SHA and (
-        hashlib.sha256(manifest_bytes).hexdigest() != REFERENCE_MANIFEST_SHA
+        hashlib.sha256(normalized_manifest).hexdigest() != REFERENCE_MANIFEST_SHA
     ):
         raise ValueError("Model inventory SHA-256 mismatch")
     entries = manifest.get("files")

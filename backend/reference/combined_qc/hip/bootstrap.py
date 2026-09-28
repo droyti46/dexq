@@ -1,95 +1,86 @@
-"""Fetch the exact public ImageNet backbone used by the hip V13 trainer."""
+"""Pinned public ResNet18 source and shared hip feature graph preparation."""
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
-import shutil
 import tempfile
-import time
-import urllib.request
+import warnings
 
-from ..common import Progress, publish_directory, write_json
+from combined_qc.common import Progress, quiet_output, write_json
+from combined_qc.router.bootstrap import OFFICIAL_SHA, SOURCE_NAME, OPSET, inference_threads
+from combined_qc.router.features import RESNET_STATE_SHA
+from .preprocessing import sha256
 
-MODEL_ID = "microsoft/resnet-18"
-MODEL_REVISION = "65a5785d9156231087c481e0c7dd33a5ff6f7e3e"
-FILES = {
-    "config.json": "11a01bcc873444bb433140e5f30f3687356641ed923266d738eef1c3438f6d22",
-    "preprocessor_config.json": "fd575b890da5a949493e1d1e7a70bfcb9e4b99fe444004d2dbfa253add254741",
-    "model.safetensors": "1cf00ee468998c23d084361b02cffadabacb5074105564c596b8079f77ecb126",
-}
-DEFAULT_SNAPSHOT = Path(__file__).resolve().parent / "checkpoints/source/pretrained/resnet18"
+ROOT = Path(__file__).resolve().parent
+BACKBONE_NAME = 'quality_backbone.onnx'
+OUTPUT_NAMES = ['global_512', 'spatial_2048', 'stage3_6400']
 
 
-def _sha256(path):
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def export_recipe_sha256():
+    paths = [ROOT / 'bootstrap.py', ROOT / 'onnx_models.py',
+             ROOT.parent / 'router/bootstrap.py', ROOT.parent / 'spine/onnx_models.py',
+             ROOT.parent / 'spine/engine/features.py']
+    return hashlib.sha256(json.dumps({str(path.relative_to(ROOT.parent)): sha256(path)
+                                     for path in paths}, sort_keys=True).encode()).hexdigest()
 
 
-def ensure_pretrained(snapshot_dir=None, *, verbose=False, ci=False):
-    """Validate or download a pinned, checksum-checked local ResNet18 snapshot.
+def prepare_source(checkpoints_dir, *, verbose=False, ci=False):
+    """Copy/download verified official ImageNet weights into hip/source only."""
+    from combined_qc.router.bootstrap import prepare_source as prepare_public
+    progress = Progress('hip', verbose or ci)
+    progress.update('source', 'Checking pinned public ImageNet ResNet18 weights')
+    with quiet_output(False):
+        target = prepare_public(checkpoints_dir, verbose=False, ci=False)
+    progress.update('source', 'Verified public weights; encoder remains frozen')
+    return target
 
-    Downloads use public Hugging Face resolve URLs and require no account or
-    application token. A complete snapshot is published only after every file
-    passes its SHA-256 check. Existing corrupt files are rejected explicitly.
-    """
-    destination = (Path(snapshot_dir).expanduser().resolve() if snapshot_dir is not None
-                   else DEFAULT_SNAPSHOT)
-    progress = Progress("hip", enabled=verbose or ci)
-    missing = []
-    for name, expected_hash in FILES.items():
-        path = destination / name
-        if not path.is_file():
-            missing.append(name)
-        elif _sha256(path) != expected_hash:
-            raise ValueError(f"Pinned hip pretrained checksum mismatch: {path}")
-    if not missing:
-        progress.update("pretrained", f"Validated local {MODEL_ID}@{MODEL_REVISION}")
-        return destination
 
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix=".resnet18-download-", dir=destination.parent))
-    try:
-        for index, (name, expected_hash) in enumerate(FILES.items(), 1):
-            target = staging / name
-            if name not in missing:
-                shutil.copy2(destination / name, target)
-                continue
-            # A custom checkpoint folder keeps its own complete initial snapshot.
-            # Reuse the verified public cache without downloading it again.
-            cached = DEFAULT_SNAPSHOT / name
-            if cached.resolve() != (destination / name).resolve() and cached.is_file():
-                if _sha256(cached) != expected_hash:
-                    raise ValueError(f"Pinned hip pretrained cache mismatch: {cached}")
-                shutil.copy2(cached, target)
-                progress.update("pretrained", f"Copied verified {name}", index, len(FILES))
-                continue
-            progress.update("pretrained", f"Downloading {name}", index, len(FILES))
-            url = f"https://huggingface.co/{MODEL_ID}/resolve/{MODEL_REVISION}/{name}"
-            request = urllib.request.Request(url, headers={"User-Agent": "DXA-QC/1.0"})
-            digest, received, last_update = hashlib.sha256(), 0, time.monotonic()
-            with urllib.request.urlopen(request, timeout=45) as response, target.open("wb") as handle:
-                expected_size = response.headers.get("Content-Length")
-                total = int(expected_size) if expected_size and expected_size.isdigit() else None
-                for chunk in iter(lambda: response.read(1024 * 1024), b""):
-                    received += len(chunk)
-                    if received > 512 * 1024 * 1024:
-                        raise ValueError(f"Unexpectedly large pretrained download: {name}")
-                    digest.update(chunk)
-                    handle.write(chunk)
-                    if time.monotonic() - last_update >= 3:
-                        progress.update("pretrained", name, received, total)
-                        last_update = time.monotonic()
-            if digest.hexdigest() != expected_hash:
-                raise ValueError(f"Downloaded pretrained checksum mismatch: {name}")
-            progress.update("pretrained", f"{name}: SHA-256 verified ({received} bytes)", index, len(FILES))
-        write_json(staging / "download_provenance.json", {
-            "model_id": MODEL_ID, "revision": MODEL_REVISION, "file_sha256": FILES,
-        })
-        publish_directory(staging, destination)
-        return destination
-    finally:
-        if staging.exists():
-            shutil.rmtree(staging)
+def load_source_graph(checkpoints_dir):
+    from combined_qc.router.bootstrap import load_source_graph as load_public
+    from .onnx_models import SharedQualityGraph
+    public, provenance = load_public(checkpoints_dir)
+    graph = SharedQualityGraph(public).cpu().eval().requires_grad_(False)
+    provenance = dict(provenance, export_recipe_sha256=export_recipe_sha256(),
+                      output_features={'global_512': 512, 'spatial_2048': 2048, 'stage3_6400': 6400})
+    return graph, provenance
+
+
+def export_backbone(checkpoints_dir, target, *, verbose=False, ci=False):
+    import onnx
+    import torch
+    target = Path(target).resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    graph, provenance = load_source_graph(checkpoints_dir)
+    Progress('hip', verbose or ci).update('convert', 'Exporting one frozen shared ResNet18 feature encoder')
+    with inference_threads(), torch.inference_mode(), warnings.catch_warnings():
+        warnings.filterwarnings('ignore', category=DeprecationWarning)
+        torch.onnx.export(graph, (torch.zeros((1, 320, 320), dtype=torch.uint8),), target,
+            input_names=['gray_u8'], output_names=OUTPUT_NAMES, opset_version=OPSET,
+            dynamo=False, external_data=False,
+            dynamic_axes={name: {0: 'batch'} for name in ['gray_u8', *OUTPUT_NAMES]})
+    onnx.checker.check_model(str(target))
+    return {'path': target.name, 'sha256': sha256(target), **provenance}
+
+
+def prepare_backbone(checkpoints_dir, *, verbose=False, ci=False):
+    """Private training graph; live runtime is published only by convert_all."""
+    with quiet_output(verbose or ci):
+        base = Path(checkpoints_dir).resolve()
+        prepare_source(base, verbose=verbose, ci=ci)
+        target = base / 'source' / BACKBONE_NAME
+        metadata_path = target.with_suffix('.json')
+        if target.is_file() and metadata_path.is_file():
+            metadata = json.loads(metadata_path.read_text())
+            if (metadata.get('sha256') == sha256(target)
+                    and metadata.get('source_sha256') == OFFICIAL_SHA
+                    and metadata.get('feature_state_sha256') == RESNET_STATE_SHA
+                    and metadata.get('export_recipe_sha256') == export_recipe_sha256()):
+                Progress('hip', verbose or ci).update('features', 'Reusing verified private shared feature graph')
+                return target
+        with tempfile.TemporaryDirectory(dir=base / 'source', prefix='.backbone-') as temporary:
+            staged = Path(temporary) / BACKBONE_NAME
+            metadata = export_backbone(base, staged, verbose=verbose, ci=ci)
+            staged.replace(target)
+        write_json(metadata_path, metadata)
+        return target
