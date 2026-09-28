@@ -4,7 +4,8 @@ import { Link, Navigate } from 'react-router-dom';
 import AppShell from '../components/AppShell';
 import StudyViewer from '../components/StudyViewer';
 import { measureManualAxis } from '../geometry';
-import type { AnalysisResult, BatchResult, CheckResult, Point } from '../types';
+import { readResults } from '../results';
+import type { AnalysisResult, CheckResult, Point } from '../types';
 
 const regionLabels = {
   auto: 'Авто',
@@ -23,13 +24,7 @@ const statusLabels: Record<CheckResult['status'], string> = {
 type Axis = { top: Point; bottom: Point };
 
 export default function ResultPage() {
-  const batch = useMemo(() => {
-    try {
-      return JSON.parse(sessionStorage.getItem('dexq:last-results') ?? 'null') as BatchResult | null;
-    } catch {
-      return null;
-    }
-  }, []);
+  const batch = useMemo(() => readResults(), []);
   const [activeIndex, setActiveIndex] = useState(0);
   const [page, setPage] = useState(0);
   const [manualAxes, setManualAxes] = useState<Record<string, Axis>>({});
@@ -85,7 +80,7 @@ export default function ResultPage() {
           <section className="result-errors" aria-label="Файлы без результата">
             <h2>Нужна повторная проверка: {errors.length}</h2>
             <ul>{errors.slice(0, 20).map((item, index) => <li key={`${item.filename}-${index}`}>
-              <strong>{item.filename}</strong>: {item.error || item.result?.error || 'Анализ не завершён'}
+              <strong>Изображение {item.input_position ?? index + 1}: {item.filename}</strong>: {item.error || item.result?.error || 'Анализ не завершён'}
             </li>)}</ul>
             {errors.length > 20 && <p>Показаны первые 20 ошибок из {errors.length}. Полный список можно получить через CSV API.</p>}
           </section>
@@ -103,7 +98,7 @@ export default function ResultPage() {
                 const imageIndex = page * pageSize + index;
                 return <button key={`${item.result.analysis_id}-${imageIndex}`} type="button"
                   role="tab" aria-selected={activeIndex === imageIndex} className={activeIndex === imageIndex ? 'active' : ''}
-                  onClick={() => setActiveIndex(imageIndex)}>Изображение {imageIndex + 1}</button>;
+                  onClick={() => setActiveIndex(imageIndex)}>Изображение {item.input_position ?? imageIndex + 1}</button>;
               })}
             </div>
           </>}

@@ -70,7 +70,7 @@ async def analyze_batch(
             status_code=422, detail=f"За один запрос принимается от 1 до {MAX_BATCH_FILES} файлов"
         )
     items: list[BatchItem] = []
-    for file in files:
+    for position, file in enumerate(files, 1):
         filename = file.filename or "study.dcm"
         try:
             content = await _read_upload(file, request.app.state.max_upload_bytes)
@@ -78,14 +78,15 @@ async def analyze_batch(
             items.append(
                 BatchItem(
                     filename=PurePath(filename.replace("\\", "/")).name,
+                    input_position=position,
                     input_path=filename,
                     error=str(error),
                 )
             )
             continue
-        items.extend(
-            analyze_items(_analyzer(request), [(filename, content)], anatomical_region).items
-        )
+        analyzed = analyze_items(_analyzer(request), [(filename, content)], anatomical_region).items
+        analyzed[0].input_position = position
+        items.extend(analyzed)
     successful = sum(
         item.result is not None and item.result.processing_status == "Success" for item in items
     )

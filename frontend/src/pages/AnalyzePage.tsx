@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { analyzeStudies } from '../api';
 import AppShell from '../components/AppShell';
+import { saveResults } from '../results';
 import type { AnatomicalRegion } from '../types';
 
 const allowedExtensions = ['.dcm', '.dicom', '.png', '.zip'];
@@ -51,7 +52,7 @@ export default function AnalyzePage() {
     setError('');
     try {
       const results = await analyzeStudies(files, region);
-      sessionStorage.setItem('dexq:last-results', JSON.stringify(results));
+      saveResults(results);
       navigate('/result');
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Неизвестная ошибка');

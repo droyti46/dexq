@@ -20,7 +20,7 @@ export async function analyzeStudies(
   }
   if (!isArchive && !isBatch) {
     const result = (await response.json()) as AnalysisResult;
-    return { items: [{ filename: result.filename, result, error: null }], successful: 1, failed: 0 };
+    return { items: [{ filename: result.filename, input_position: 1, result, error: null }], successful: 1, failed: 0 };
   }
   return (await response.json()) as BatchResult;
 }

@@ -46,7 +46,7 @@ export interface AnalysisResult {
 }
 
 export interface BatchResult {
-  items: Array<{ filename: string; result: AnalysisResult | null; error: string | null }>;
+  items: Array<{ filename: string; input_position: number | null; result: AnalysisResult | null; error: string | null }>;
   successful: number;
   failed: number;
 }

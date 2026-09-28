@@ -146,6 +146,7 @@ def test_empty_upload_among_other_files_preserves_order() -> None:
         "empty.dcm",
         "last.dcm",
     ]
+    assert [item["input_position"] for item in response.json()["items"]] == [1, 2, 3]
     assert response.json()["failed"] == 3
 
 
@@ -244,31 +245,38 @@ def test_archive_endpoint_analyzes_before_reading_next_member(monkeypatch) -> No
     assert [item["filename"] for item in response.json()["items"]] == ["one.dcm", "two.dcm"]
 
 
-def test_archive_json_keeps_results_for_browser() -> None:
+def test_archive_same_basename_keeps_anonymous_member_positions() -> None:
     buffer = BytesIO()
-    with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
-        archive.writestr("study/broken.dcm", b"not dicom")
+    with ZipFile(buffer, "w") as archive:
+        archive.writestr("private_a/study.png", b"invalid")
+        archive.writestr("private_b/study.png", b"invalid")
     response = client.post(
         "/api/v1/analyses/archive",
         files={"archive": ("study.zip", buffer.getvalue(), "application/zip")},
     )
     assert response.status_code == 200
-    assert len(response.json()["items"]) == 1
-    assert response.json()["failed"] == 1
+    items = response.json()["items"]
+    assert [item["filename"] for item in items] == ["study.png", "study.png"]
+    assert [item["input_position"] for item in items] == [1, 2]
+    assert response.json()["failed"] == 2
+    assert "private_a" not in response.text and "private_b" not in response.text
 
 
-def test_archive_json_omits_patient_path_but_csv_preserves_relative_path() -> None:
+def test_archive_rejects_unsupported_compression_with_422() -> None:
     buffer = BytesIO()
-    with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
-        archive.writestr("SECRET_PERSON/study.dcm", b"not dicom")
-    kwargs = {"files": {"archive": ("study.zip", buffer.getvalue(), "application/zip")}}
-    response = client.post("/api/v1/analyses/archive", **kwargs)
-    assert response.status_code == 200
-    assert response.json()["items"][0]["filename"] == "study.dcm"
-    assert "SECRET_PERSON" not in response.text
-    csv_response = client.post("/api/v1/analyses/archive.csv", **kwargs)
-    assert csv_response.status_code == 200
-    assert "SECRET_PERSON/study.dcm" in csv_response.text
+    with ZipFile(buffer, "w") as archive:
+        archive.writestr("image.dcm", b"invalid")
+    content = bytearray(buffer.getvalue())
+    local_header = content.index(b"PK\x03\x04")
+    central_header = content.index(b"PK\x01\x02")
+    content[local_header + 8 : local_header + 10] = (99).to_bytes(2, "little")
+    content[central_header + 10 : central_header + 12] = (99).to_bytes(2, "little")
+    response = client.post(
+        "/api/v1/analyses/archive",
+        files={"archive": ("study.zip", bytes(content), "application/zip")},
+    )
+    assert response.status_code == 422
+    assert "сжатия" in response.json()["detail"]
 
 
 def test_archive_keeps_two_hundred_failure_rows() -> None:

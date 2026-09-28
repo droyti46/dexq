@@ -84,6 +84,8 @@ def iter_archive(content: bytes, max_file_bytes: int) -> Iterator[tuple[str, byt
                 yield info.filename, archive.read(info)
     except BadZipFile as error:
         raise ValueError("Не удалось прочитать ZIP-архив") from error
+    except NotImplementedError as error:
+        raise ValueError("Метод сжатия ZIP-архива не поддерживается") from error
 
 
 def read_archive(content: bytes, max_file_bytes: int) -> list[tuple[str, bytes]]:
@@ -118,7 +120,7 @@ def analyze_items(
         Пакетный результат с количеством успешных и ошибочных файлов.
     """
     results: list[BatchItem] = []
-    for filename, content in items:
+    for position, (filename, content) in enumerate(items, 1):
         safe_name = Path(filename.replace("\\", "/")).name or "study.dcm"
         try:
             result = analyzer.analyze(content, filename, region)
@@ -126,17 +128,26 @@ def analyze_items(
                 results.append(
                     BatchItem(
                         filename=safe_name,
+                        input_position=position,
                         input_path=filename,
                         result=result,
                         error=result.error or "Анализ не завершён",
                     )
                 )
             else:
-                results.append(BatchItem(filename=safe_name, input_path=filename, result=result))
+                results.append(
+                    BatchItem(
+                        filename=safe_name,
+                        input_position=position,
+                        input_path=filename,
+                        result=result,
+                    )
+                )
         except (ValueError, OSError, RuntimeError):
             results.append(
                 BatchItem(
                     filename=safe_name,
+                    input_position=position,
                     input_path=filename,
                     error="Не удалось безопасно обработать файл",
                 )

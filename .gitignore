@@ -13,6 +13,7 @@ coverage/
 backend/models/*.pth
 backend/models/*.pt
 backend/models/
+backend/reference/combined_qc/outputs/
 local-test-images/
 submission/
 *.onnx

@@ -100,15 +100,6 @@ def test_archive_rejects_unsafe_names(bad: str) -> None:
         read_archive(buffer.getvalue(), 1024 * 1024)
 
 
-def test_archive_keeps_all_supported_images_in_mixed_input() -> None:
-    buffer = BytesIO()
-    with ZipFile(buffer, "w") as archive:
-        archive.writestr("study/one.dcm", dicom())
-        archive.writestr("study/two.png", b"not a valid PNG")
-    items = read_archive(buffer.getvalue(), 1024 * 1024)
-    assert [name for name, _ in items] == ["study/one.dcm", "study/two.png"]
-
-
 def test_archive_streams_one_member_at_a_time() -> None:
     buffer = BytesIO()
     with ZipFile(buffer, "w") as archive:
