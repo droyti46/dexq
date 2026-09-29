@@ -3,9 +3,11 @@ import { useNavigate } from 'react-router-dom';
 
 import { analyzeStudies } from '../api';
 import AppShell from '../components/AppShell';
+import { saveResults } from '../results';
 import type { AnatomicalRegion } from '../types';
 
-const allowedExtensions = ['.dcm', '.dicom', '.png', '.jpg', '.jpeg'];
+const allowedExtensions = ['.dcm', '.dicom', '.png', '.zip'];
+const maxFiles = 200;
 
 export default function AnalyzePage() {
   const navigate = useNavigate();
@@ -18,7 +20,15 @@ export default function AnalyzePage() {
 
   function acceptFiles(list: FileList | null) {
     if (!list) return;
-    const next = Array.from(list).slice(0, 3);
+    const next = Array.from(list);
+    if (next.length > maxFiles) {
+      setError('В одном запросе не более 200 изображений. Ни один файл не отброшен.');
+      return;
+    }
+    if (next.some((file) => file.name.toLowerCase().endsWith('.zip')) && next.length !== 1) {
+      setError('Загрузите ZIP отдельно от остальных изображений.');
+      return;
+    }
     const invalid = next.find(
       (file) => !allowedExtensions.some((extension) => file.name.toLowerCase().endsWith(extension)),
     );
@@ -42,7 +52,7 @@ export default function AnalyzePage() {
     setError('');
     try {
       const results = await analyzeStudies(files, region);
-      sessionStorage.setItem('dexq:last-results', JSON.stringify(results));
+      saveResults(results);
       navigate('/result');
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Неизвестная ошибка');
@@ -57,7 +67,7 @@ export default function AnalyzePage() {
         <section className="page-intro">
           <p className="eyebrow">Новое исследование</p>
           <h1>Проверка качества DXA</h1>
-          <p>Загрузите до трёх изображений одного исследования. Обработка выполняется локально.</p>
+          <p>Загрузите до 200 изображений или один ZIP-архив. Обработка выполняется локально.</p>
         </section>
 
         <section className="analysis-grid">
@@ -76,7 +86,7 @@ export default function AnalyzePage() {
               <input
                 ref={inputRef}
                 type="file"
-                accept=".dcm,.dicom,.png,.jpg,.jpeg,application/dicom"
+                accept=".dcm,.dicom,.png,.zip,application/dicom,application/zip"
                 multiple
                 hidden
                 onChange={(event: ChangeEvent<HTMLInputElement>) => acceptFiles(event.target.files)}
@@ -86,12 +96,12 @@ export default function AnalyzePage() {
               </div>
               <h2>{files.length ? `${files.length} файл(а) выбрано` : 'Перетащите DICOM сюда'}</h2>
               <p>или нажмите, чтобы выбрать на компьютере</p>
-              <span>DICOM · PNG/JPEG для демо · до 50 МБ</span>
+              <span>До 200 DICOM/PNG или один ZIP · до 50 МБ на снимок</span>
             </div>
 
             {files.length > 0 && (
               <ul className="file-list">
-                {files.map((file) => (
+                {files.slice(0, 20).map((file) => (
                   <li key={`${file.name}-${file.size}`}>
                     <div className="file-mark">DX</div>
                     <div>
@@ -107,6 +117,7 @@ export default function AnalyzePage() {
                     </button>
                   </li>
                 ))}
+                {files.length > 20 && <li>И ещё {files.length - 20} выбранных изображений</li>}
               </ul>
             )}
           </div>

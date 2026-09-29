@@ -1,4 +1,4 @@
-FROM python:3.12.6-slim-bookworm
+FROM python:3.12.6-slim-bookworm@sha256:ad48727987b259854d52241fac3bc633574364867b8e20aec305e6e7f4028b26
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -7,11 +7,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY pyproject.toml requirements.lock ./
 COPY app ./app
-RUN pip install --upgrade pip==26.0.1 \
+COPY reference ./reference
+RUN pip install --upgrade pip==26.0.1 setuptools==80.9.0 \
     && pip install -r requirements.lock \
-    && pip install --no-deps .
-
-RUN useradd --create-home --uid 10001 dexq
+    && pip install --no-build-isolation --no-deps . \
+    && useradd --create-home --uid 10001 dexq
 USER dexq
 
 EXPOSE 8000

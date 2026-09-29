@@ -1,88 +1,57 @@
 # DEXQ
 
-Локальный медицинский инструмент для автоматической проверки качества DXA-исследований. Проект состоит из React-интерфейса и FastAPI-сервиса с независимыми модулями контроля укладки, охвата и артефактов.
+Локальный технический MVP для контроля качества DXA-снимков. Финальное эталонное решение работает за FastAPI и React без изменения модельного ядра; результаты — исследовательские, **не** клиническая валидация и не диагноз. Не загружайте DICOM и производные изображения во внешние сервисы.
 
-> Текущая версия — технический MVP для хакатона. Эвристические проверки не прошли клиническую валидацию и не предназначены для постановки диагноза.
+## Запуск без Docker (проверен локально)
 
-Полная продуктовая и техническая спецификация находится в [SPEC.md](./SPEC.md).
+Нужны Python 3.12, Node.js 22 и **отдельный** оптимизированный архив `dxa_qc_with_models (2).zip`, SHA-256 `b92ed6e89b1bb54358b1e06681842dbecac006880cf9062ea68980673ff12f0a`. Веса **не входят в Git**; 22 runtime-файла (276 423 364 байта вместе с манифестами и конфигурацией) устанавливаются локально перед первым запуском.
 
-## Быстрый запуск без Docker
+Из каталога `backend/`:
 
-Требуются Python 3.12 и Node.js 22.
-
-### Backend
-
-```powershell
-cd backend
+```bash
 python -m venv .venv
-.\.venv\Scripts\python -m pip install -e ".[dev]"
-.\.venv\Scripts\python -m uvicorn app.main:app --reload --port 8000
+.venv/bin/python -m pip install -e '.[dev]'
+.venv/bin/python ../scripts/prepare_reference.py "/local/path/dxa_qc_with_models (2).zip"
+.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Документация API: <http://localhost:8000/docs>.
-
-### Frontend
-
-```powershell
-cd frontend
-npm install
-npm run dev
-```
-
-Интерфейс: <http://localhost:3000>.
-
-## Запуск в контейнерах
+Для Windows вместо `.venv/bin/python` используйте `.venv/Scripts/python`. Frontend в отдельном терминале:
 
 ```bash
-chmod +x scripts/run.sh
-./scripts/run.sh
+npm --prefix frontend ci
+npm --prefix frontend run dev
 ```
 
-Или напрямую:
+Веб-интерфейс: <http://localhost:3000>; документация API: <http://localhost:8000/docs>. Пока веса не установлены/не загрузились, `/api/v1/health` отвечает 503; fallback на другую модель не предусмотрен. Для контейнеров, проверки манифеста и ограничений офлайн-поставки см. [развёртывание](docs/deployment.md); скрипт `scripts/run.sh` требует локальный Docker Engine, рабочий контейнерный запуск в текущем окружении пока **не подтверждён**.
+
+## Демо и данные
+
+Локально разложить 255 обезличенных примеров по экспертным категориям можно командой из `backend/`:
 
 ```bash
-docker compose up --build
+.venv/bin/python ../scripts/prepare_samples.py "/local/path/dxa_qc_with_models (2).zip" --output ../local-test-images
 ```
 
-Frontend откроется на <http://localhost:3000>, API — на <http://localhost:8000>.
+Папка игнорируется Git: `normal/`, `spine_positioning/`, `spine_axis/`, `spine_artifacts/`, `hip_positioning_rotation/`, `hip_roi/`, `multiple/`, `unlabeled/`. Один снимок может быть в нескольких категориях; это development-набор, не независимая проверка. [Руководство по экрану, ручной оси и CSV](docs/user-guide.md).
 
-## API
+API принимает одиночный DICOM или демонстрационный grayscale PNG, пакет до 200 файлов и архив ZIP до 200 изображений для JSON или CSV; веб-интерфейс тоже принимает один ZIP. Экспорт содержит по одной строке на входное изображение, включая `Failure`, и восемь столбцов задания. Для локального CLI:
 
-- `GET /api/v1/health` — проверка готовности.
-- `GET /api/v1/checks` — реестр проверок.
-- `POST /api/v1/analyses` — один DICOM.
-- `POST /api/v1/analyses/batch` — пакет до трёх файлов.
-- `POST /api/v1/analyses/batch.csv` — пакетный CSV по формату задания.
-
-Для демонстрации одиночный endpoint также принимает PNG/JPEG. Анатомическую область можно передать полем `anatomical_region`: `auto`, `lumbar_spine` или `proximal_femur`.
-
-## Структура
-
-```text
-backend/             FastAPI, чтение DICOM, проверки и тесты
-frontend/            React/Vite, основные экраны
-data/                исходные архивы организатора (не копируются в контейнер)
-scripts/run.sh       запуск контейнерного стенда
-SPEC.md              единая спецификация
-CLAUDE.md            правила для AI-разработчиков
-spine_pipeline.ipynb исследовательский pipeline позвоночника
-```
-
-## Проверка
-
-```powershell
+```bash
 cd backend
-.\.venv\Scripts\python -m pytest
-.\.venv\Scripts\python -m ruff check .
-
-cd ..\frontend
-npm run build
+.venv/bin/python -m app.cli /local/path/studies.zip /local/path/results.csv
 ```
 
-## Известные ограничения
+Ограничения: проекция не определяется, бедро выдаёт объединённый флаг позиционирования/ротации, bbox бедра не анатомическая маска. Автоматический результат модели и ручная правка **двух найденных** точек позвоночника показаны отдельно; сервер исправления не хранит. Разбивку проверок и границы интерпретации см. в [спецификации](SPEC.md) и [описании модели](docs/model.md); численные оценки — в [метриках](docs/metrics.md).
 
-- Верхняя ветка охвата Th12, SpineNet и классификатор артефактов из notebook ещё не подключены к runtime.
-- Ось позвоночника в MVP локализуется временной детерминированной эвристикой; правило угла и порог 5° соответствуют notebook.
-- Модули бедра уже представлены в общем контракте, но до подключения моделей возвращают `not_evaluated`.
-- Автоопределение области основано на DICOM-описаниях и может потребовать ручного выбора.
+## Проверка изменений
 
+```bash
+cd backend
+.venv/bin/python -m pytest
+.venv/bin/python -m ruff check .
+cd ../frontend
+npm run build
+node --experimental-strip-types --test src/geometry.test.ts
+```
+
+Для parity на исходных снимках укажите локальный `DEXQ_REFERENCE_ZIP` с путём к архиву перед pytest. Данные из архива — development-набор, не независимая клиническая проверка; описание оценок см. в [метриках](docs/metrics.md). Новый локальный benchmark текущего комплекта на 102 исследованиях/255 уникальных DICOM: 255/255 `Success`, максимум 15.895 с/исследование (≤3 кадра), среднее 4.262 с на прогретом CPUExecutionProvider, холодная загрузка 2.6479 с. Это те же development-снимки, а не независимая проверка точности или аппаратных требований; прежний benchmark относился к предыдущим весам. Офлайн Docker-запуск не подтверждён.

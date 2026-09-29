@@ -22,6 +22,7 @@ def create_app() -> FastAPI:
     )
     app.state.analyzer = Analyzer()
     app.state.max_upload_bytes = int(os.getenv("DEXQ_MAX_UPLOAD_MB", "50")) * 1024 * 1024
+    app.state.max_archive_bytes = int(os.getenv("DEXQ_MAX_ARCHIVE_MB", "1024")) * 1024 * 1024
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:3000", "http://localhost:5173"],
@@ -39,4 +40,3 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-

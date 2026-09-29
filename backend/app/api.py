@@ -1,17 +1,19 @@
 """HTTP API DEXQ версии 1."""
 
-import csv
-from io import StringIO
+import json
+from collections.abc import Iterator
+from pathlib import PurePath
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 
 from app.analyzer import Analyzer
+from app.batch import MAX_ARCHIVE_FILES, analyze_items, iter_archive, render_csv
 from app.schemas import AnalysisResult, AnatomicalRegion, BatchItem, BatchResult, CheckInfo
 
 router = APIRouter(prefix="/api/v1")
-MAX_BATCH_FILES = 3
+MAX_BATCH_FILES = MAX_ARCHIVE_FILES
 
 
 def _analyzer(request: Request) -> Analyzer:
@@ -26,9 +28,11 @@ async def _read_upload(file: UploadFile, max_bytes: int) -> bytes:
 
 
 @router.get("/health")
-async def health() -> dict[str, str]:
-    """Возвращает готовность API."""
-    return {"status": "ok", "service": "DEXQ API", "version": "0.1.0"}
+async def health(request: Request) -> dict[str, str]:
+    """Проверяет наличие всех локальных моделей перед началом обработки."""
+    if not _analyzer(request).runtime.ready():
+        raise HTTPException(status_code=503, detail="Локальный комплект моделей недоступен")
+    return {"status": "ready", "service": "DEXQ API", "version": "0.1.0"}
 
 
 @router.get("/checks", response_model=list[CheckInfo])
@@ -46,7 +50,12 @@ async def analyze_file(
     """Обрабатывает один файл полностью в памяти."""
     try:
         content = await _read_upload(file, request.app.state.max_upload_bytes)
-        return _analyzer(request).analyze(content, file.filename or "study.dcm", anatomical_region)
+        result = _analyzer(request).analyze(
+            content, file.filename or "study.dcm", anatomical_region
+        )
+        if result.processing_status == "Failure":
+            raise HTTPException(status_code=422, detail=result.error or "Анализ не завершён")
+        return result
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
@@ -59,17 +68,30 @@ async def analyze_batch(
 ) -> BatchResult:
     """Обрабатывает пакет, не прерываясь из-за ошибки отдельного файла."""
     if not 1 <= len(files) <= MAX_BATCH_FILES:
-        raise HTTPException(status_code=422, detail="За один запрос принимается от 1 до 3 файлов")
+        raise HTTPException(
+            status_code=422, detail=f"За один запрос принимается от 1 до {MAX_BATCH_FILES} файлов"
+        )
     items: list[BatchItem] = []
-    for file in files:
+    for position, file in enumerate(files, 1):
         filename = file.filename or "study.dcm"
         try:
             content = await _read_upload(file, request.app.state.max_upload_bytes)
-            result = _analyzer(request).analyze(content, filename, anatomical_region)
-            items.append(BatchItem(filename=filename, result=result))
         except ValueError as error:
-            items.append(BatchItem(filename=filename, error=str(error)))
-    successful = sum(item.result is not None for item in items)
+            items.append(
+                BatchItem(
+                    filename=PurePath(filename.replace("\\", "/")).name,
+                    input_position=position,
+                    input_path=filename,
+                    error=str(error),
+                )
+            )
+            continue
+        analyzed = analyze_items(_analyzer(request), [(filename, content)], anatomical_region).items
+        analyzed[0].input_position = position
+        items.extend(analyzed)
+    successful = sum(
+        item.result is not None and item.result.processing_status == "Success" for item in items
+    )
     return BatchResult(items=items, successful=successful, failed=len(items) - successful)
 
 
@@ -81,35 +103,99 @@ async def analyze_batch_csv(
 ) -> Response:
     """Возвращает пакетный отчёт в формате задания."""
     batch = await analyze_batch(request, files, anatomical_region)
-    output = StringIO(newline="")
-    fieldnames = [
-        "path_to_study",
-        "study_uid",
-        "image_uid",
-        "anatomical_region",
-        "quality_class",
-        "violation_type",
-        "processing_status",
-        "time_of_processing",
-    ]
-    writer = csv.DictWriter(output, fieldnames=fieldnames)
-    writer.writeheader()
-    for item in batch.items:
-        result = item.result
-        writer.writerow(
-            {
-                "path_to_study": item.filename,
-                "study_uid": result.study_uid if result else "",
-                "image_uid": result.image_uid if result else "",
-                "anatomical_region": result.anatomical_region if result else "unknown",
-                "quality_class": result.quality_class if result else "",
-                "violation_type": ";".join(result.violation_types) if result else item.error,
-                "processing_status": result.processing_status if result else "Failure",
-                "time_of_processing": result.time_of_processing if result else 0,
-            }
-        )
     return Response(
-        content="\ufeff" + output.getvalue(),
+        content=render_csv(batch),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="dexq-results.csv"'},
+    )
+
+
+@router.post("/analyses/archive", response_model=BatchResult)
+async def analyze_archive(
+    request: Request,
+    archive: Annotated[UploadFile, File()],
+    anatomical_region: Annotated[AnatomicalRegion, Form()] = AnatomicalRegion.AUTO,
+) -> BatchResult:
+    """Обрабатывает ZIP для браузера, сохраняя результаты и ошибки каждого файла."""
+    try:
+        content = await _read_upload(archive, request.app.state.max_archive_bytes)
+        return analyze_items(
+            _analyzer(request),
+            iter_archive(content, request.app.state.max_upload_bytes),
+            anatomical_region,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@router.post("/analyses/archive.stream")
+async def analyze_archive_stream(
+    request: Request,
+    archive: Annotated[UploadFile, File()],
+    anatomical_region: Annotated[AnatomicalRegion, Form()] = AnatomicalRegion.AUTO,
+) -> StreamingResponse:
+    """Передаёт результаты элементов ZIP по мере их обработки."""
+    try:
+        content = await _read_upload(archive, request.app.state.max_archive_bytes)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    def events() -> Iterator[str]:
+        successful = 0
+        failed = 0
+        try:
+            for position, (filename, item_content) in enumerate(
+                iter_archive(content, request.app.state.max_upload_bytes), 1
+            ):
+                safe_name = PurePath(filename.replace("\\", "/")).name or "study.dcm"
+                yield json.dumps(
+                    {"type": "started", "filename": safe_name, "input_position": position},
+                    ensure_ascii=False,
+                ) + "\n"
+                item = analyze_items(
+                    _analyzer(request), [(filename, item_content)], anatomical_region
+                ).items[0]
+                item.input_position = position
+                if item.result is not None and item.result.processing_status == "Success":
+                    successful += 1
+                else:
+                    failed += 1
+                yield json.dumps(
+                    {"type": "result", "item": item.model_dump(mode="json")},
+                    ensure_ascii=False,
+                ) + "\n"
+            yield json.dumps(
+                {"type": "complete", "successful": successful, "failed": failed},
+                ensure_ascii=False,
+            ) + "\n"
+        except ValueError as error:
+            yield json.dumps({"type": "error", "detail": str(error)}, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="application/x-ndjson",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-store"},
+    )
+
+
+@router.post("/analyses/archive.csv")
+async def analyze_archive_csv(
+    request: Request,
+    archive: Annotated[UploadFile, File()],
+    anatomical_region: Annotated[AnatomicalRegion, Form()] = AnatomicalRegion.AUTO,
+) -> Response:
+    """Обрабатывает ZIP тестового набора и возвращает единый CSV."""
+    try:
+        content = await _read_upload(archive, request.app.state.max_archive_bytes)
+        batch = analyze_items(
+            _analyzer(request),
+            iter_archive(content, request.app.state.max_upload_bytes),
+            anatomical_region,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return Response(
+        content=render_csv(batch),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="dexq-archive-results.csv"'},
     )

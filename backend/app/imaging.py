@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import warnings
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -16,6 +17,40 @@ from pydicom.errors import InvalidDicomError
 from pydicom.pixels import apply_voi_lut
 
 from app.schemas import AnatomicalRegion
+
+
+def safe_dicom_fields(content: bytes, suffix: str) -> tuple[str | None, str | None, bool]:
+    """Читает только два UID и факт наличия неподдерживаемой проекции.
+
+    Args:
+        content: Исходные байты DICOM или PNG.
+        suffix: Расширение входного файла.
+
+    Returns:
+        UID исследования, UID изображения и признак явной иной проекции.
+
+    Raises:
+        ValueError: Если DICOM повреждён или пуст.
+    """
+    if suffix.lower() == ".png":
+        return None, None, False
+    if not content:
+        raise ValueError("Файл пуст")
+    try:
+        with pydicom.config.disable_value_validation():
+            dataset = pydicom.dcmread(
+                BytesIO(content),
+                stop_before_pixels=True,
+                specific_tags=["StudyInstanceUID", "SOPInstanceUID", "ViewPosition"],
+            )
+            view = str(dataset.get("ViewPosition", "")).strip().lower()
+            return (
+                _safe_uid(dataset.get("StudyInstanceUID")),
+                _safe_uid(dataset.get("SOPInstanceUID")),
+                bool(view and view != "unknown"),
+            )
+    except (InvalidDicomError, OSError, ValueError) as error:
+        raise ValueError("Не удалось прочитать DICOM") from error
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,10 +89,15 @@ def load_medical_image(content: bytes, filename: str) -> LoadedImage:
 
 def _load_dicom(content: bytes, filename: str) -> LoadedImage:
     try:
-        dataset = pydicom.dcmread(BytesIO(content), force=False)
-        if "PixelData" not in dataset:
-            raise ValueError("DICOM не содержит PixelData")
-        raw = np.asarray(apply_voi_lut(dataset.pixel_array, dataset))
+        with warnings.catch_warnings():
+            # В выданном наборе встречаются некорректные UID после анонимизации.
+            warnings.filterwarnings("ignore", message="Invalid value for VR UI")
+            dataset = pydicom.dcmread(BytesIO(content), force=False)
+            if "PixelData" not in dataset:
+                raise ValueError("DICOM не содержит PixelData")
+            raw = np.asarray(apply_voi_lut(dataset.pixel_array, dataset))
+            study_uid = _safe_uid(dataset.get("StudyInstanceUID"))
+            image_uid = _safe_uid(dataset.get("SOPInstanceUID"))
     except (InvalidDicomError, ValueError, TypeError, AttributeError, EOFError, OSError) as error:
         raise ValueError(f"Не удалось прочитать DICOM: {error}") from error
 
@@ -68,8 +108,8 @@ def _load_dicom(content: bytes, filename: str) -> LoadedImage:
     region, source = _detect_region(dataset, filename)
     return LoadedImage(
         pixels=normalized,
-        study_uid=_safe_uid(dataset.get("StudyInstanceUID")),
-        image_uid=_safe_uid(dataset.get("SOPInstanceUID")),
+        study_uid=study_uid,
+        image_uid=image_uid,
         region=region,
         region_source=source,
         preview_data_url=_preview_data_url(normalized),
@@ -140,6 +180,12 @@ def _detect_region(dataset: Dataset, filename: str) -> tuple[AnatomicalRegion, s
     hip_name_tokens = ("ппоб", "лпоб", "hip", "femur")
     if any(token in normalized_name for token in hip_name_tokens):
         return AnatomicalRegion.PROXIMAL_FEMUR, "filename"
+    width = int(dataset.get("Columns", 0) or 0)
+    height = int(dataset.get("Rows", 0) or 0)
+    if width >= 295 and 0.8 <= height / width <= 1.25:
+        return AnatomicalRegion.LUMBAR_SPINE, "dataset_geometry"
+    if 240 <= width <= 285 and 0.6 <= height / width <= 1.7:
+        return AnatomicalRegion.PROXIMAL_FEMUR, "dataset_geometry"
     return AnatomicalRegion.UNKNOWN, "dicom_metadata_inconclusive"
 
 
@@ -147,7 +193,11 @@ def _safe_uid(value: object) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
-    return text if text and len(text) <= 128 else None
+    return (
+        text
+        if text and len(text) <= 128 and all(part.isdecimal() for part in text.split("."))
+        else None
+    )
 
 
 def _preview_data_url(pixels: np.ndarray) -> str:

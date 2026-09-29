@@ -3,4 +3,10 @@ __pycache__
 .pytest_cache
 tests
 models
+*.dcm
+*.dicom
+*.png
+*.onnx
+*.npz
+.env
 

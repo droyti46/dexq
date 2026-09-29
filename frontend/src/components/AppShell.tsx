@@ -10,16 +10,15 @@ export default function AppShell({ children, dark = false }: AppShellProps) {
   return (
     <div className={dark ? 'app-shell app-shell--dark' : 'app-shell'}>
       <header className="site-header">
-        <Link className="wordmark" to="/" aria-label="DEXQ — главная">
-          DEXQ<span className="wordmark__cut" />
-        </Link>
         <nav className="site-nav" aria-label="Основная навигация">
-          <NavLink to="/about">О продукте</NavLink>
           <a href="http://localhost:8000/docs" target="_blank" rel="noreferrer">
-            API
+            Документация
           </a>
-          <NavLink className="nav-cta" to="/analyze">
-            Анализ
+          <Link className="wordmark" to="/" aria-label="DEXQ — главная">
+            DEXQ<span className="wordmark__cut" />
+          </Link>
+          <NavLink to="/team">
+            Наша команда
           </NavLink>
         </nav>
       </header>
@@ -27,4 +26,3 @@ export default function AppShell({ children, dark = false }: AppShellProps) {
     </div>
   );
 }
-

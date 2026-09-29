@@ -1,0 +1,132 @@
+"""Одно изображение — одна CSV-строка, даже при ошибке или превышении размера исследования."""
+
+import csv
+from io import BytesIO, StringIO
+from zipfile import ZipFile
+
+import pytest
+from test_analysis_contract import dicom
+
+from app.batch import analyze_items, read_archive, render_csv
+from app.schemas import AnalysisResult, AnatomicalRegion
+
+
+class StudyAnalyzer:
+    def analyze(self, content: bytes, filename: str, region: AnatomicalRegion) -> AnalysisResult:
+        from app.imaging import safe_dicom_fields
+
+        uid, image_uid, _ = safe_dicom_fields(content, ".dcm")
+        return AnalysisResult(
+            analysis_id="an_test",
+            filename=filename,
+            study_uid=uid,
+            image_uid=image_uid,
+            anatomical_region=AnatomicalRegion.LUMBAR_SPINE,
+            region_source="model",
+            quality_class=1,
+            violation_types=["spine_positioning", "spine_axis"],
+            processing_status="Success",
+            time_of_processing=0.25,
+            checks=[],
+            preview_data_url="",
+        )
+
+
+def _with_study(uid: str) -> bytes:
+    from io import BytesIO
+
+    import pydicom
+
+    dataset = pydicom.dcmread(BytesIO(dicom()))
+    dataset.StudyInstanceUID = uid
+    buffer = BytesIO()
+    dataset.save_as(buffer, enforce_file_format=True)
+    return buffer.getvalue()
+
+
+def test_more_than_three_images_of_study_are_processed() -> None:
+    first = dicom()
+    second = _with_study("1.2.4")
+    items = [(f"case/a{i}.dcm", first) for i in range(3)] + [
+        ("case/b1.dcm", second),
+        ("case/a4.dcm", first),
+        ("case/b2.dcm", second),
+        ("case/b3.dcm", second),
+    ]
+    result = analyze_items(StudyAnalyzer(), items, AnatomicalRegion.AUTO)
+    assert len(result.items) == 7
+    assert result.successful == 7
+    assert result.failed == 0
+    assert result.items[4].filename == "a4.dcm"
+    assert result.items[4].input_path == "case/a4.dcm"
+    assert "case/a4.dcm" in render_csv(result)
+    assert result.items[4].result is not None
+    assert result.items[-1].result is not None
+
+
+def test_batch_json_hides_archive_path_but_csv_keeps_relative_path() -> None:
+    batch = analyze_items(
+        StudyAnalyzer(), [("SECRET_PERSON/study.dcm", b"invalid")], AnatomicalRegion.AUTO
+    )
+    assert batch.items[0].filename == "study.dcm"
+    assert "SECRET_PERSON" not in batch.model_dump_json()
+    rows = list(csv.DictReader(StringIO(render_csv(batch).lstrip("﻿"))))
+    assert rows[0]["path_to_study"] == "SECRET_PERSON/study.dcm"
+
+
+def test_invalid_dicom_keeps_path_and_empty_uid_and_class() -> None:
+    batch = analyze_items(StudyAnalyzer(), [("incoming/broken.dcm", b"bad")], AnatomicalRegion.AUTO)
+    rows = list(csv.DictReader(StringIO(render_csv(batch).lstrip("﻿"))))
+    assert rows[0]["path_to_study"] == "incoming/broken.dcm"
+    assert rows[0]["study_uid"] == ""
+    assert rows[0]["quality_class"] == ""
+    assert rows[0]["processing_status"] == "Failure"
+    assert len(rows[0]) == 8
+
+
+def test_csv_codes_are_sorted_and_semicolon_separated() -> None:
+    batch = analyze_items(StudyAnalyzer(), [("incoming/study.dcm", dicom())], AnatomicalRegion.AUTO)
+    rows = list(csv.DictReader(StringIO(render_csv(batch).lstrip("﻿"))))
+    assert rows[0]["violation_type"] == "spine_axis;spine_positioning"
+    assert rows[0]["time_of_processing"] == "0.25"
+
+
+@pytest.mark.parametrize("bad", ["../escape.dcm", "/absolute.dcm", "CON.dcm"])
+def test_archive_rejects_unsafe_names(bad: str) -> None:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w") as archive:
+        archive.writestr(bad, dicom())
+    with pytest.raises(ValueError, match="путь"):
+        read_archive(buffer.getvalue(), 1024 * 1024)
+
+
+def test_archive_streams_one_member_at_a_time() -> None:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w") as archive:
+        archive.writestr("one.dcm", b"first")
+        archive.writestr("two.dcm", b"second")
+    from app.batch import iter_archive
+
+    images = iter_archive(buffer.getvalue(), 1024)
+    assert next(images) == ("one.dcm", b"first")
+    assert next(images) == ("two.dcm", b"second")
+    with pytest.raises(StopIteration):
+        next(images)
+
+
+def test_archive_rejects_more_than_two_hundred_images() -> None:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w") as archive:
+        for index in range(201):
+            archive.writestr(f"case_{index:04d}.dcm", b"not dicom")
+    with pytest.raises(ValueError, match="200"):
+        read_archive(buffer.getvalue(), 1024 * 1024)
+
+
+def test_archive_rejects_duplicate_image_name() -> None:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w") as archive:
+        archive.writestr("study/file.dcm", dicom())
+        archive.writestr("study/file.dcm", dicom())
+    with pytest.raises(ValueError, match="повтор"):
+        read_archive(buffer.getvalue(), 1024 * 1024)

@@ -1,6 +1,8 @@
 """Контрактные тесты API на синтетическом обезличенном DICOM."""
 
+import json
 from io import BytesIO
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import numpy as np
 from fastapi.testclient import TestClient
@@ -28,14 +30,12 @@ def make_dicom() -> bytes:
     dataset.Columns = 192
     dataset.SamplesPerPixel = 1
     dataset.PhotometricInterpretation = "MONOCHROME2"
-    dataset.BitsAllocated = 16
-    dataset.BitsStored = 12
-    dataset.HighBit = 11
+    dataset.BitsAllocated = 8
+    dataset.BitsStored = 8
+    dataset.HighBit = 7
     dataset.PixelRepresentation = 0
     y, x = np.mgrid[:256, :192]
-    pixels = (2800 * np.exp(-((x - 96) ** 2) / 500 - ((y - 128) ** 2) / 9000)).astype(
-        np.uint16
-    )
+    pixels = (255 * np.exp(-((x - 96) ** 2) / 500 - ((y - 128) ** 2) / 9000)).astype(np.uint8)
     dataset.PixelData = pixels.tobytes()
     buffer = BytesIO()
     dataset.save_as(buffer, enforce_file_format=True)
@@ -43,34 +43,25 @@ def make_dicom() -> bytes:
 
 
 def test_health_and_checks() -> None:
-    assert client.get("/api/v1/health").json()["status"] == "ok"
+    assert client.get("/api/v1/health").json()["status"] == "ready"
     checks = client.get("/api/v1/checks").json()
     assert {item["check_id"] for item in checks} == {
-        "spine_coverage",
-        "spine_tilt",
-        "artifact",
-        "hip_coverage",
-        "hip_rotation",
+        "spine_positioning",
+        "spine_axis",
+        "spine_artifacts",
+        "hip_positioning_rotation",
         "hip_roi",
     }
 
 
-def test_analyze_dicom() -> None:
+def test_unclassifiable_axis_returns_controlled_failure() -> None:
     response = client.post(
         "/api/v1/analyses",
         files={"file": ("study.dcm", make_dicom(), "application/dicom")},
-        data={"anatomical_region": "auto"},
+        data={"anatomical_region": "lumbar_spine"},
     )
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["anatomical_region"] == "lumbar_spine"
-    assert payload["study_uid"]
-    assert payload["preview_data_url"].startswith("data:image/png;base64,")
-    assert {item["check_id"] for item in payload["checks"]} == {
-        "spine_coverage",
-        "spine_tilt",
-        "artifact",
-    }
+    assert response.status_code == 422
+    assert "SECRET" not in response.text
 
 
 def test_batch_csv_keeps_failures() -> None:
@@ -80,11 +71,256 @@ def test_batch_csv_keeps_failures() -> None:
             ("files", ("valid.dcm", make_dicom(), "application/dicom")),
             ("files", ("broken.dcm", b"not dicom", "application/dicom")),
         ],
-        data={"anatomical_region": "auto"},
+        data={"anatomical_region": "lumbar_spine"},
     )
     assert response.status_code == 200
-    assert "Success" in response.text
-    assert "Failure" in response.text
+    assert "Success" not in response.text
+    assert response.text.count("Failure") == 2
+
+
+def test_archive_csv_processes_files_without_extracting() -> None:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("study/valid_ПОП.dcm", make_dicom())
+        archive.writestr("study/broken.dcm", b"not dicom")
+        archive.writestr("notes/readme.txt", "ignored")
+    response = client.post(
+        "/api/v1/analyses/archive.csv",
+        files={"archive": ("studies.zip", buffer.getvalue(), "application/zip")},
+        data={"anatomical_region": "lumbar_spine"},
+    )
+    assert response.status_code == 200
+    assert "study/valid_ПОП.dcm" in response.text
+    assert "study/broken.dcm" in response.text
+    assert "Success" not in response.text
+    assert response.text.count("Failure") == 2
+
+
+def test_batch_keeps_independent_files_in_one_study() -> None:
+    payload = make_dicom()
+    response = client.post(
+        "/api/v1/analyses/batch",
+        files=[("files", (f"image{i}.dcm", payload, "application/dicom")) for i in range(3)],
+        data={"anatomical_region": "lumbar_spine"},
+    )
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 3
+    assert response.json()["successful"] == 0
+    assert response.json()["failed"] == 3
+
+
+def test_four_uploads_are_processed_without_silent_truncation() -> None:
+    payload = make_dicom()
+    response = client.post(
+        "/api/v1/analyses/batch",
+        files=[("files", (f"image{i}.dcm", payload, "application/dicom")) for i in range(4)],
+    )
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 4
+    assert response.json()["failed"] == 4  # Синтетический кадр не даёт двух точек.
+
+
+def test_empty_batch_upload_keeps_failure_row_and_csv() -> None:
+    files = [("files", ("empty.dcm", b"", "application/dicom"))]
+    response = client.post("/api/v1/analyses/batch", files=files)
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 1
+    assert response.json()["failed"] == 1
+    assert response.json()["items"][0]["result"]["processing_status"] == "Failure"
+    csv_response = client.post("/api/v1/analyses/batch.csv", files=files)
+    assert csv_response.status_code == 200
+    assert csv_response.text.count("Failure") == 1
+
+
+def test_empty_upload_among_other_files_preserves_order() -> None:
+    response = client.post(
+        "/api/v1/analyses/batch",
+        files=[
+            ("files", ("first.dcm", b"invalid", "application/dicom")),
+            ("files", ("empty.dcm", b"", "application/dicom")),
+            ("files", ("last.dcm", b"invalid", "application/dicom")),
+        ],
+    )
+    assert response.status_code == 200
+    assert [item["filename"] for item in response.json()["items"]] == [
+        "first.dcm",
+        "empty.dcm",
+        "last.dcm",
+    ]
+    assert [item["input_position"] for item in response.json()["items"]] == [1, 2, 3]
+    assert response.json()["failed"] == 3
+
+
+def test_batch_keeps_uploaded_order_when_one_image_is_too_large() -> None:
+    old_limit = app.state.max_upload_bytes
+    app.state.max_upload_bytes = 100_000
+    try:
+        response = client.post(
+            "/api/v1/analyses/batch",
+            files=[
+                ("files", ("first.dcm", make_dicom(), "application/dicom")),
+                ("files", ("too-large.dcm", b"x" * 100_001, "application/dicom")),
+                ("files", ("last.dcm", b"invalid", "application/dicom")),
+            ],
+        )
+    finally:
+        app.state.max_upload_bytes = old_limit
+    assert response.status_code == 200
+    assert [item["filename"] for item in response.json()["items"]] == [
+        "first.dcm",
+        "too-large.dcm",
+        "last.dcm",
+    ]
+
+
+def test_batch_json_omits_patient_name_from_uploaded_filename() -> None:
+    response = client.post(
+        "/api/v1/analyses/batch",
+        files=[("files", ("C:/patients/SECRET_PERSON/study.dcm", b"invalid", "application/dicom"))],
+    )
+    assert response.status_code == 200
+    assert response.json()["items"][0]["filename"] == "study.dcm"
+    assert "SECRET_PERSON" not in response.text
+
+
+def test_batch_releases_each_upload_before_reading_next() -> None:
+    payload = make_dicom()
+
+    class TrackingFile:
+        def __init__(self, name: str) -> None:
+            self.filename = name
+            self.calls = 0
+
+        async def read(self, limit: int) -> bytes:
+            self.calls += 1
+            if self.filename == "second.dcm":
+                assert first.calls == 1
+                assert processed == ["first.dcm"]
+            return payload
+
+    first = TrackingFile("first.dcm")
+    second = TrackingFile("second.dcm")
+    processed: list[str] = []
+
+    class TrackingAnalyzer:
+        def analyze(self, content: bytes, filename: str, region: object) -> object:
+            processed.append(filename)
+            return app.state.analyzer.analyze(content, filename, region)
+
+    from app.api import analyze_batch
+
+    class Request:
+        def __init__(self) -> None:
+            self.app = type("App", (), {"state": type("State", (), {
+                "analyzer": TrackingAnalyzer(), "max_upload_bytes": 100_000
+            })()})()
+
+    import asyncio
+
+    asyncio.run(analyze_batch(Request(), [first, second]))
+    assert processed == ["first.dcm", "second.dcm"]
+
+
+def test_archive_endpoint_analyzes_before_reading_next_member(monkeypatch) -> None:
+    import app.api as api
+
+    processed: list[str] = []
+    original_analyze = app.state.analyzer.analyze
+
+    def record_analysis(content: bytes, filename: str, region: object) -> object:
+        processed.append(filename)
+        return original_analyze(content, filename, region)
+
+    def images(_content: bytes, _limit: int):
+        yield "one.dcm", b"invalid"
+        assert processed == ["one.dcm"]
+        yield "two.dcm", b"invalid"
+
+    monkeypatch.setattr(api, "iter_archive", images)
+    monkeypatch.setattr(app.state.analyzer, "analyze", record_analysis)
+    response = client.post(
+        "/api/v1/analyses/archive",
+        files={"archive": ("study.zip", b"placeholder", "application/zip")},
+    )
+    assert response.status_code == 200
+    assert [item["filename"] for item in response.json()["items"]] == ["one.dcm", "two.dcm"]
+
+
+def test_archive_same_basename_keeps_anonymous_member_positions() -> None:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w") as archive:
+        archive.writestr("private_a/study.png", b"invalid")
+        archive.writestr("private_b/study.png", b"invalid")
+    response = client.post(
+        "/api/v1/analyses/archive",
+        files={"archive": ("study.zip", buffer.getvalue(), "application/zip")},
+    )
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert [item["filename"] for item in items] == ["study.png", "study.png"]
+    assert [item["input_position"] for item in items] == [1, 2]
+    assert response.json()["failed"] == 2
+    assert "private_a" not in response.text and "private_b" not in response.text
+
+
+def test_archive_stream_emits_incremental_item_events() -> None:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("study/one.dcm", b"invalid")
+        archive.writestr("study/two.dcm", b"invalid")
+    response = client.post(
+        "/api/v1/analyses/archive.stream",
+        files={"archive": ("studies.zip", buffer.getvalue(), "application/zip")},
+    )
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines()]
+    assert [event["type"] for event in events] == [
+        "started", "result", "started", "result", "complete"
+    ]
+    assert [event["filename"] for event in events if event["type"] == "started"] == [
+        "one.dcm", "two.dcm"
+    ]
+    assert events[-1] == {"type": "complete", "successful": 0, "failed": 2}
+
+
+def test_archive_rejects_unsupported_compression_with_422() -> None:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w") as archive:
+        archive.writestr("image.dcm", b"invalid")
+    content = bytearray(buffer.getvalue())
+    local_header = content.index(b"PK\x03\x04")
+    central_header = content.index(b"PK\x01\x02")
+    content[local_header + 8 : local_header + 10] = (99).to_bytes(2, "little")
+    content[central_header + 10 : central_header + 12] = (99).to_bytes(2, "little")
+    response = client.post(
+        "/api/v1/analyses/archive",
+        files={"archive": ("study.zip", bytes(content), "application/zip")},
+    )
+    assert response.status_code == 422
+    assert "сжатия" in response.json()["detail"]
+
+
+def test_archive_keeps_two_hundred_failure_rows() -> None:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
+        for index in range(200):
+            archive.writestr(f"study/case_{index:04d}.dcm", b"invalid")
+    response = client.post(
+        "/api/v1/analyses/archive.csv",
+        files={"archive": ("studies.zip", buffer.getvalue(), "application/zip")},
+    )
+    assert response.status_code == 200
+    assert response.text.count("Failure") == 200
+    assert len(response.text.splitlines()) == 201
+
+
+def test_more_than_two_hundred_uploads_are_rejected() -> None:
+    response = client.post(
+        "/api/v1/analyses/batch",
+        files=[("files", (f"image{i}.dcm", b"invalid", "application/dicom")) for i in range(201)],
+    )
+    assert response.status_code == 422
+    assert "200" in response.text
 
 
 def test_tilt_uses_strict_five_degree_threshold() -> None:
@@ -93,4 +329,3 @@ def test_tilt_uses_strict_five_degree_threshold() -> None:
     tilted = measure_tilt([112, 10], [100, 110])
     assert tilted["angle_deg"] > 5
     assert tilted["violation"] is True
-
