@@ -15,7 +15,7 @@ from app.main import app
 client = TestClient(app)
 
 
-def make_dicom() -> bytes:
+def make_dicom(view: str | None = None) -> bytes:
     """Создаёт минимальный DICOM без персональных данных."""
     meta = FileMetaDataset()
     meta.MediaStorageSOPClassUID = SecondaryCaptureImageStorage
@@ -26,6 +26,8 @@ def make_dicom() -> bytes:
     dataset.SOPInstanceUID = meta.MediaStorageSOPInstanceUID
     dataset.StudyInstanceUID = generate_uid()
     dataset.BodyPartExamined = "LUMBAR SPINE"
+    if view is not None:
+        dataset.ViewPosition = view
     dataset.Rows = 256
     dataset.Columns = 192
     dataset.SamplesPerPixel = 1
@@ -62,6 +64,28 @@ def test_unclassifiable_axis_returns_controlled_failure() -> None:
     )
     assert response.status_code == 422
     assert "SECRET" not in response.text
+
+
+def test_batch_api_reports_explicit_projection_without_extra_csv_column() -> None:
+    response = client.post(
+        "/api/v1/analyses/batch",
+        files=[("files", ("ap.dcm", make_dicom("AP"), "application/dicom"))],
+        data={"anatomical_region": "lumbar_spine"},
+    )
+    assert response.status_code == 200
+    assert response.json()["items"][0]["result"]["projection"] == "AP"
+    assert response.json()["items"][0]["result"]["projection_source"] == "dicom_view_position"
+
+    csv_response = client.post(
+        "/api/v1/analyses/batch.csv",
+        files=[("files", ("ap.dcm", make_dicom("AP"), "application/dicom"))],
+        data={"anatomical_region": "lumbar_spine"},
+    )
+    assert csv_response.status_code == 200
+    assert csv_response.text.removeprefix("﻿").splitlines()[0] == (
+        "path_to_study,study_uid,image_uid,anatomical_region,quality_class,"
+        "violation_type,processing_status,time_of_processing"
+    )
 
 
 def test_batch_csv_keeps_failures() -> None:
@@ -221,6 +245,57 @@ def test_batch_releases_each_upload_before_reading_next() -> None:
     assert processed == ["first.dcm", "second.dcm"]
 
 
+def test_health_remains_responsive_during_blocking_analysis(monkeypatch) -> None:
+    import asyncio
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    import app.api as api
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_analyze(*_args: object) -> object:
+        started.set()
+        assert release.wait(timeout=5)
+        return "done"
+
+    monkeypatch.setattr(api, "analyze_items", slow_analyze)
+    buffer = BytesIO()
+    with ZipFile(buffer, "w") as archive:
+        archive.writestr("study/one.dcm", b"placeholder")
+
+    class Request:
+        def __init__(self) -> None:
+            self.app = type("App", (), {"state": type("State", (), {
+                "analyzer": object(), "max_upload_bytes": 100_000,
+                "max_archive_bytes": 100_000,
+            })()})()
+
+    class Upload:
+        async def read(self, _limit: int) -> bytes:
+            return buffer.getvalue()
+
+    from app.api import analyze_archive_csv
+
+    async def check() -> None:
+        task = asyncio.create_task(analyze_archive_csv(Request(), Upload()))
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            await asyncio.get_running_loop().run_in_executor(executor, started.wait, 5)
+        assert started.is_set()
+        observed = asyncio.Event()
+        asyncio.get_running_loop().call_soon(observed.set)
+        await asyncio.wait_for(observed.wait(), 0.5)
+        release.set()
+        monkeypatch.setattr(api, "render_csv", lambda _batch: "csv")
+        assert (await task).status_code == 200
+
+    try:
+        asyncio.run(check())
+    finally:
+        release.set()
+
+
 def test_archive_endpoint_analyzes_before_reading_next_member(monkeypatch) -> None:
     import app.api as api
 
@@ -280,6 +355,10 @@ def test_archive_stream_emits_incremental_item_events() -> None:
     assert [event["filename"] for event in events if event["type"] == "started"] == [
         "one.dcm", "two.dcm"
     ]
+    assert [event["input_path"] for event in events if event["type"] == "started"] == [
+        "study/one.dcm", "study/two.dcm"
+    ]
+    assert all("input_path" not in event["item"] for event in events if event["type"] == "result")
     assert events[-1] == {"type": "complete", "successful": 0, "failed": 2}
 
 
@@ -312,6 +391,19 @@ def test_archive_keeps_two_hundred_failure_rows() -> None:
     assert response.status_code == 200
     assert response.text.count("Failure") == 200
     assert len(response.text.splitlines()) == 201
+
+
+def test_archive_rejects_one_thousand_and_one_images_with_422() -> None:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w") as archive:
+        for index in range(1001):
+            archive.writestr(f"study/case_{index:04d}.dcm", b"tiny")
+    response = client.post(
+        "/api/v1/analyses/archive",
+        files={"archive": ("studies.zip", buffer.getvalue(), "application/zip")},
+    )
+    assert response.status_code == 422
+    assert "1000" in response.json()["detail"]
 
 
 def test_more_than_two_hundred_uploads_are_rejected() -> None:

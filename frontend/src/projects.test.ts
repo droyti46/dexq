@@ -19,7 +19,8 @@ test('invalid upload and total capacity violations do not alter existing items',
   const old = [item('old')];
   assert.throws(() => appendFiles(old, [file('bad.txt')]));
   assert.throws(() => appendFiles(old, [file('archive.zip'), file()]));
-  assert.throws(() => appendFiles(Array.from({ length: 200 }, (_, i) => item(String(i))), [file()]));
+  assert.equal(appendFiles(Array.from({ length: 999 }, (_, i) => item(String(i))), [file()]).length, 1000);
+  assert.throws(() => appendFiles(Array.from({ length: 1000 }, (_, i) => item(String(i))), [file()]));
   assert.equal(old.length, 1);
 });
 
@@ -43,8 +44,8 @@ test('plain selection, toggle and range selection remain independent of active i
 });
 
 test('CSV includes completed errors only, escapes quotes and neutralizes formulas', () => {
-  const csv = reportCsv([{ ...item('a'), filename: '=SUM(1,2)".png', status: 'error', error: 'failed' }, item('pending')]);
+  const csv = reportCsv([{ ...item('a'), filename: '=SUM(1,2)".png', status: 'error', error: 'failed' }, item('pending')], 'submission');
   assert.equal(csv.split('\r\n')[0], '﻿path_to_study,study_uid,image_uid,anatomical_region,quality_class,violation_type,processing_status,time_of_processing');
-  assert.equal(csv.split('\r\n')[1], '"\'=SUM(1,2)"".png","","","unknown","","","Failure",""');
+  assert.equal(csv.split('\r\n')[1], '"\'=SUM(1,2)"".png","","","unknown","","","Failure","0"');
   assert.equal(csv.split('\r\n').length, 3);
 });

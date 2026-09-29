@@ -25,7 +25,7 @@ const initialView: ViewTransform = { zoom: 1, x: 0, y: 0 };
 
 const StudyViewer = forwardRef<StudyViewerHandle, Props>(function StudyViewer({ result, manualAxis, onAxisChange, onOverlayChange, onAxisCommit }, ref) {
   const [overlay, setOverlay] = useState(Boolean(result.geometry || result.annotated_data_url));
-  const [tool, setTool] = useState<'pointer' | 'pan'>('pan');
+  const [tool, setTool] = useState<'pointer' | 'pan'>('pointer');
   const [view, setView] = useState(initialView);
   const [brightness, setBrightness] = useState(100);
   const [contrast, setContrast] = useState(100);
@@ -38,7 +38,9 @@ const StudyViewer = forwardRef<StudyViewerHandle, Props>(function StudyViewer({ 
   const geometry = result.geometry;
   const original = geometry?.axis_line;
   const axis = manualAxis ?? (original ? { top: original.top_xy, bottom: original.bottom_xy } : null);
-  const editable = tool === 'pointer' && overlay && result.anatomical_region === 'lumbar_spine' && axis !== null;
+  const editable = tool === 'pointer' && overlay && result.processing_status === 'Success'
+    && result.anatomical_region === 'lumbar_spine' && Boolean(original)
+    && result.checks.some((check) => check.check_id === 'spine_axis') && axis !== null;
   const hasOverlay = Boolean(geometry || result.annotated_data_url);
 
   useEffect(() => {
@@ -145,7 +147,7 @@ const StudyViewer = forwardRef<StudyViewerHandle, Props>(function StudyViewer({ 
         </svg>}
       </div>
       <div className="viewer-readout">{geometry && <span>{geometry.image_width} × {geometry.image_height}</span>}<span>{Math.round(view.zoom * 100)}%</span></div>
-      <span className="viewer-hint">Колесо — масштаб · Перетаскивание — перемещение · Двойной клик — вписать</span>
+      <span className="viewer-hint">{editable ? 'Точки — редактирование · ' : ''}Колесо — масштаб · Перетаскивание — перемещение · Двойной клик — вписать</span>
     </div>
     <div className="viewer-adjustments"><label>Яркость <input type="range" min="50" max="150" value={brightness} onChange={(event) => setBrightness(Number(event.target.value))} />{brightness}%</label>
       <label>Контраст <input type="range" min="50" max="150" value={contrast} onChange={(event) => setContrast(Number(event.target.value))} />{contrast}%</label></div>

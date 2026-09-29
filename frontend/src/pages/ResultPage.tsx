@@ -125,7 +125,7 @@ export default function ResultPage() {
               </div>}
               <dl className="metadata-list">
                 <div><dt>Область</dt><dd>{regionLabels[result.anatomical_region]}</dd></div>
-                <div><dt>Проекция</dt><dd>Не определена для этого набора</dd></div>
+                <div><dt>Проекция</dt><dd>{result.projection === 'unknown' ? 'Не определена' : result.projection}</dd></div>
                 <div><dt>Время</dt><dd>{result.time_of_processing.toFixed(2)} сек</dd></div>
                 <div><dt>Study UID</dt><dd>{result.study_uid ?? 'не задан'}</dd></div>
                 <div><dt>Image UID</dt><dd>{result.image_uid ?? 'не задан'}</dd></div>

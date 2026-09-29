@@ -1340,32 +1340,44 @@ def render(c: skia.Canvas, t: float) -> None:
     reveal(c, u, scene, t - scene.start)
 
 
-def frame(surface: skia.Surface, t: float) -> np.ndarray:
+Draw = Callable[[skia.Canvas, float], None]
+
+
+def frame(surface: skia.Surface, draw: Draw, t: float) -> np.ndarray:
     c = surface.getCanvas()
     c.clear(color(WHITE))
-    render(c, t)
+    draw(c, t)
     return surface.makeImageSnapshot().toarray(colorType=skia.kRGBA_8888_ColorType)
 
 
 _worker_surface: skia.Surface | None = None
 
 
-def frame_bytes(n: int) -> bytes:
+def frame_bytes(draw: Draw, n: int) -> bytes:
     """Кадр n для пула процессов: у каждого процесса своя поверхность."""
     global _worker_surface
     if _worker_surface is None:
         _worker_surface = skia.Surface(W, H)
-    return frame(_worker_surface, n / FPS).tobytes()
+    return frame(_worker_surface, draw, n / FPS).tobytes()
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--out", type=Path, default=OUTPUT)
+def run(draw: Draw, duration: float, output: Path, description: str) -> None:
+    """CLI ролика: PNG-кадры для проверки (--still) или кодирование MP4.
+
+    Args:
+        draw: Функция отрисовки кадра по времени; должна быть функцией уровня модуля,
+            чтобы её можно было передать в процессы пула.
+        duration: Длительность ролика в секундах.
+        output: Путь MP4 по умолчанию.
+        description: Описание для --help.
+    """
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument("--out", type=Path, default=output)
     parser.add_argument(
         "--still", type=float, nargs="*", help="сохранить PNG кадры на указанных секундах"
     )
     parser.add_argument("--start", type=float, default=0.0)
-    parser.add_argument("--end", type=float, default=DURATION)
+    parser.add_argument("--end", type=float, default=duration)
     args = parser.parse_args()
 
     surface = skia.Surface(W, H)
@@ -1374,12 +1386,13 @@ def main() -> None:
         folder.mkdir(exist_ok=True)
         for t in args.still:
             path = folder / f"still-{t:05.2f}.png"
-            frame(surface, t)
+            frame(surface, draw, t)
             surface.makeImageSnapshot().save(str(path), skia.kPNG)
             print(path)
         return
 
     import os
+    from functools import partial as bind
     from multiprocessing import Pool
 
     import imageio_ffmpeg
@@ -1399,7 +1412,8 @@ def main() -> None:
     # Размытые тени дороги на CPU, поэтому кадры рисуются параллельно, а
     # кодируются строго по порядку.
     with Pool(max(1, (os.cpu_count() or 2) - 1)) as pool:
-        for n, data in enumerate(pool.imap(frame_bytes, range(first, last), chunksize=4), first):
+        frames = pool.imap(bind(frame_bytes, draw), range(first, last), chunksize=4)
+        for n, data in enumerate(frames, first):
             writer.send(data)
             if n % FPS == 0:
                 print(f"{n / FPS:5.1f} с", flush=True)
@@ -1408,4 +1422,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    run(render, DURATION, OUTPUT, __doc__.splitlines()[0])

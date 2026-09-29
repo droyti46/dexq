@@ -67,8 +67,8 @@ class AnalysisResult(BaseModel):
     image_uid: str | None
     anatomical_region: AnatomicalRegion
     region_source: str
-    projection: Literal["unknown"] = "unknown"
-    projection_source: Literal["not_determined"] = "not_determined"
+    projection: Literal["AP", "PA", "unknown"] = "unknown"
+    projection_source: Literal["dicom_view_position", "not_determined"] = "not_determined"
     needs_review: bool = False
     quality_class: int | None = Field(default=None, ge=0, le=1)
     violation_types: list[str]

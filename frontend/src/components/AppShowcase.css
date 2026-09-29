@@ -1,0 +1,69 @@
+.app-showcase {
+  position: relative;
+  padding: 110px 24px 84px;
+  overflow: hidden;
+  color: #12142c;
+  background: #fff;
+}
+
+.app-showcase__inner { width: min(1180px, 100%); margin: 0 auto; }
+.showcase-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; }
+.showcase-heading h2 { margin: 0 0 22px; font-size: clamp(32px, 4.5vw, 60px); line-height: 1.08; letter-spacing: -.045em; }
+.showcase-heading p { max-width: 520px; margin: 0; color: #71758d; font-size: 16px; line-height: 1.7; }
+.showcase-cta { display: inline-flex; flex-shrink: 0; align-items: center; gap: 26px; padding: 15px 19px; border: 1px solid #0202f1; border-radius: 10px; color: #0202f1; font-size: 13px; }
+.showcase-cta:hover { color: white; background: #0202f1; }
+.showcase-composition { position: relative; height: clamp(480px, 51vw, 640px); margin: 65px 0 55px; }
+.showcase-outline { position: absolute; inset: 7% 4% 10% 8%; border: 1px solid #c6c6fc; border-radius: 40px; transform: rotate(3deg); }
+.showcase-shot { position: absolute; margin: 0; }
+.showcase-shot button { position: relative; display: block; width: 100%; padding: 5px; overflow: hidden; border: 1.5px solid #0202f1; border-radius: 17px; background: #fff; box-shadow: 0 20px 48px rgba(18, 20, 44, .14); cursor: zoom-in; }
+.showcase-shot img { display: block; width: 100%; height: auto; border-radius: 11px; }
+.showcase-shot figcaption { display: inline-block; position: absolute; bottom: -16px; left: 24px; padding: 9px 13px; border: 1px solid #0202f1; border-radius: 7px; color: #0202f1; background: white; font-size: 11px; box-shadow: 0 5px 12px rgba(18,20,44,.05); }
+.showcase-shot--workspace { z-index: 2; width: 84%; top: 13%; left: 0; transform: rotate(-1.5deg); }
+.showcase-shot--projects { z-index: 3; width: 35%; top: -2%; right: 0; transform: rotate(3deg); }
+.showcase-shot--detail { z-index: 4; width: 24%; right: 1.5%; bottom: 2%; transform: rotate(-3deg); }
+.showcase-shot--detail figcaption { left: auto; right: 12px; white-space: nowrap; }
+.showcase-expand { position: absolute; top: 14px; right: 14px; display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid #656978; border-radius: 7px; color: white; background: #222529e6; opacity: 0; transition: opacity .15s ease; }
+.showcase-shot button:hover .showcase-expand, .showcase-shot button:focus-visible .showcase-expand { opacity: 1; }
+.showcase-features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 34px; }
+.showcase-features article { padding-top: 22px; border-top: 1px solid #d6d6fc; }
+.showcase-feature-icon { display: inline-grid; place-items: center; color: #0202f1; margin-bottom: 18px; }
+.showcase-features h3 { margin: 0 0 12px; font-size: 19px; letter-spacing: -.02em; }
+.showcase-features p { margin: 0; max-width: 350px; font-size: 13px; line-height: 1.8; color: #71758d; }
+.showcase-dialog { width: min(1380px, calc(100% - 32px)); max-height: calc(100dvh - 32px); padding: 10px; color: #12142c; background: white; border: 1.5px solid #0202f1; border-radius: 15px; overflow-y: auto; }
+.showcase-dialog::backdrop { background: rgba(12, 14, 35, .76); }
+.showcase-dialog__heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 8px 6px 17px; font-size: 13px; }
+.showcase-dialog__heading button { display: grid; place-items: center; padding: 7px; border: 0; border-radius: 5px; color: #0202f1; background: #f2f3ff; cursor: pointer; }
+.showcase-dialog > img { display: block; max-width: 100%; max-height: calc(100dvh - 120px); margin: 0 auto; border-radius: 8px; }
+
+@media (max-width: 900px) {
+  .app-showcase { padding: 72px 24px 60px; }
+  .showcase-heading p { font-size: 14px; max-width: 400px; }
+  .showcase-composition { height: 470px; margin: 55px 0 45px; }
+  .showcase-shot--workspace { width: 91%; top: 19%; }
+  .showcase-shot--projects { width: 43%; }
+  .showcase-shot--detail { width: 29%; right: 0; bottom: 0; }
+  .showcase-features { gap: 22px; }
+  .showcase-features h3 { font-size: 16px; }
+}
+
+@media (max-width: 600px) {
+  .app-showcase { padding: 55px 20px 45px; }
+  .showcase-heading { display: block; }
+  .showcase-heading h2 { font-size: 35px; }
+  .showcase-heading p { font-size: 14px; }
+  .showcase-cta { margin-top: 24px; padding: 12px 16px; }
+  .showcase-composition { height: auto; min-height: 510px; margin: 42px 0 44px; }
+  .showcase-outline { inset: 0 0 11% 4%; border-radius: 24px; }
+  .showcase-shot--workspace { position: relative; top: auto; width: 100%; padding-top: 85px; }
+  .showcase-shot--projects { width: 66%; top: 0; right: -4px; }
+  .showcase-shot--detail { position: relative; width: 64%; margin: -14px 0 0 auto; bottom: auto; right: -3px; }
+  .showcase-shot button { border-radius: 12px; padding: 3px; }
+  .showcase-shot img { border-radius: 8px; }
+  .showcase-shot figcaption { font-size: 9px; padding: 7px 9px; left: 12px; bottom: -12px; }
+  .showcase-shot--detail figcaption { right: 8px; left: auto; }
+  .showcase-features { grid-template-columns: 1fr; gap: 25px; }
+  .showcase-features article { display: grid; grid-template-columns: 26px 1fr; gap: 0 16px; }
+  .showcase-feature-icon { grid-row: 1 / 3; margin: 0; align-self: start; }
+  .showcase-features h3 { font-size: 18px; }
+  .showcase-features p { grid-column: 2; }
+}

@@ -63,6 +63,7 @@ class Analyzer:
         suffix = PurePath(filename).suffix.lower()
         study_uid: str | None = None
         image_uid: str | None = None
+        projection = "unknown"
         region = AnatomicalRegion.UNKNOWN
         region_source = "not_determined"
         preview = ""
@@ -75,7 +76,7 @@ class Analyzer:
         processing_status: str = "Failure"
         error_message: str | None = None
         try:
-            study_uid, image_uid, unsupported_view = safe_dicom_fields(content, suffix)
+            study_uid, image_uid, projection, unsupported_view = safe_dicom_fields(content, suffix)
             if unsupported_view:
                 raise ValueError("Проекция вне подтверждённого профиля эталонной модели")
             if suffix not in {".dcm", ".dicom", ".png"}:
@@ -135,6 +136,10 @@ class Analyzer:
             study_uid=study_uid,
             image_uid=image_uid,
             anatomical_region=region,
+            projection=projection,
+            projection_source=(
+                "dicom_view_position" if projection != "unknown" else "not_determined"
+            ),
             region_source=region_source,
             quality_class=quality_class,
             violation_types=violation_types,

@@ -1,20 +1,18 @@
 import writeXlsxFile from 'write-excel-file/browser';
 import type { CellObject } from 'write-excel-file/browser';
 import type { WorkspaceItem } from './projects';
+import { reportTable } from './manualAxis.ts';
 
-export function excelReportData(items: WorkspaceItem[]): CellObject[][] {
-  const headers = ['path_to_study', 'study_uid', 'image_uid', 'anatomical_region', 'quality_class', 'violation_type', 'processing_status', 'time_of_processing'];
-  const rows = items.filter((item) => item.status === 'ready' || item.status === 'error').map((item) => {
-    const r = item.result;
-    return [item.filename, r?.study_uid ?? '', r?.image_uid ?? '', r?.anatomical_region ?? 'unknown',
-      r?.quality_class ?? '', r?.violation_types.join(';') ?? '', r?.processing_status ?? 'Failure', r?.time_of_processing ?? '']
-      .map((value): CellObject => ({ value, type: typeof value === 'number' ? Number : String, wrap: true, alignVertical: 'top' }));
-  });
-  return [headers.map((value): CellObject => ({ value, type: String, fontWeight: 'bold', textColor: '#FFFFFF', backgroundColor: '#353A42', wrap: true })), ...rows];
+export function excelReportData(items: WorkspaceItem[], kind: 'submission' | 'clinical' = 'clinical'): CellObject[][] {
+  const { headers, rows } = reportTable(items, kind);
+  return [headers.map((value): CellObject => ({ value, type: String, fontWeight: 'bold', textColor: '#FFFFFF', backgroundColor: '#353A42', wrap: true })),
+    ...rows.map((row) => row.map((value): CellObject => ({ value, type: typeof value === 'number' ? Number : String, wrap: true, alignVertical: 'top' })))];
 }
 
-export async function excelReportBlob(items: WorkspaceItem[]): Promise<Blob> {
-  return writeXlsxFile(excelReportData(items), {
-    sheet: 'DEXQ', stickyRowsCount: 1, columns: [32, 36, 36, 25, 16, 44, 22, 24].map((width) => ({ width })),
+export async function excelReportBlob(items: WorkspaceItem[], kind: 'submission' | 'clinical' = 'clinical'): Promise<Blob> {
+  const data = excelReportData(items, kind);
+  return writeXlsxFile(data, {
+    sheet: 'DEXQ', stickyRowsCount: 1, columns: [32, 36, 36, 25, 16, 44, 22, 24, 28, 16, 16, 16, 16, 18, 24].slice(0, data[0].length).map((width) => ({ width })),
+
   }, { fontFamily: 'Arial', fontSize: 11 }).toBlob();
 }

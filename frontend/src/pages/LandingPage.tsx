@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import skeleton from '../../img/skeleton.png';
 import dots from '../../img/dots.png';
 import AppShell from '../components/AppShell';
+import AppShowcase from '../components/AppShowcase';
 
 export default function LandingPage() {
   const heroRef = useRef<HTMLElement>(null);
@@ -54,28 +55,12 @@ export default function LandingPage() {
         </div>
       </main>
       <section className="promo-section" aria-label="Промо DEXQ">
-        <video className="promo-video" controls autoPlay muted playsInline preload="metadata" aria-label="Проморолик DEXQ">
-          <source src="/media/dexq-demo.mp4" type="video/mp4" />
-          Ваш браузер не поддерживает видео. <a href="/media/dexq-demo.mp4">Открыть ролик</a>
+        <video className="promo-video" controls autoPlay muted loop playsInline preload="metadata" aria-label="Проморолик DEXQ">
+          <source src="/media/dexq-demo-serious.mp4" type="video/mp4" />
+          Ваш браузер не поддерживает видео. <a href="/media/dexq-demo-serious.mp4">Открыть ролик</a>
         </video>
       </section>
-      <section className="feature-strip" aria-label="Основные возможности">
-        <article>
-          <span>01</span>
-          <h2>До 3 серий</h2>
-          <p>Один файл или пакет исследования.</p>
-        </article>
-        <article>
-          <span>02</span>
-          <h2>6 проверок</h2>
-          <p>Независимые модули без связи с интерфейсом.</p>
-        </article>
-        <article>
-          <span>03</span>
-          <h2>Понятный отчёт</h2>
-          <p>Тип нарушения, уверенность и объяснение.</p>
-        </article>
-      </section>
+      <AppShowcase />
     </AppShell>
   );
 }

@@ -945,19 +945,21 @@ h3,
 }
 
 .team-card__portrait {
-  min-height: 290px;
+  width: 100%;
+  aspect-ratio: 1;
   margin-bottom: 24px;
-  display: grid;
-  place-items: center;
-  color: rgba(255, 255, 255, 0.9);
+  display: block;
+  object-fit: cover;
+  object-position: center;
   border-radius: 9px;
-  background: linear-gradient(145deg, #0202f1, #8383ff);
-  font-size: 58px;
 }
 
-.team-card > span {
+.team-card__role {
+  display: block;
+  margin: 0 12px 14px;
   color: var(--blue);
-  font-size: 10px;
+  font-size: 11px;
+  line-height: 1.6;
 }
 
 .team-card h2 {

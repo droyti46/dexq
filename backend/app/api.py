@@ -7,13 +7,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from app.analyzer import Analyzer
-from app.batch import MAX_ARCHIVE_FILES, analyze_items, iter_archive, render_csv
+from app.batch import analyze_items, iter_archive, render_csv
 from app.schemas import AnalysisResult, AnatomicalRegion, BatchItem, BatchResult, CheckInfo
 
 router = APIRouter(prefix="/api/v1")
-MAX_BATCH_FILES = MAX_ARCHIVE_FILES
+MAX_BATCH_FILES = 200
 
 
 def _analyzer(request: Request) -> Analyzer:
@@ -50,8 +51,8 @@ async def analyze_file(
     """Обрабатывает один файл полностью в памяти."""
     try:
         content = await _read_upload(file, request.app.state.max_upload_bytes)
-        result = _analyzer(request).analyze(
-            content, file.filename or "study.dcm", anatomical_region
+        result = await run_in_threadpool(
+            _analyzer(request).analyze, content, file.filename or "study.dcm", anatomical_region
         )
         if result.processing_status == "Failure":
             raise HTTPException(status_code=422, detail=result.error or "Анализ не завершён")
@@ -86,7 +87,9 @@ async def analyze_batch(
                 )
             )
             continue
-        analyzed = analyze_items(_analyzer(request), [(filename, content)], anatomical_region).items
+        analyzed = (await run_in_threadpool(
+            analyze_items, _analyzer(request), [(filename, content)], anatomical_region
+        )).items
         analyzed[0].input_position = position
         items.extend(analyzed)
     successful = sum(
@@ -119,7 +122,8 @@ async def analyze_archive(
     """Обрабатывает ZIP для браузера, сохраняя результаты и ошибки каждого файла."""
     try:
         content = await _read_upload(archive, request.app.state.max_archive_bytes)
-        return analyze_items(
+        return await run_in_threadpool(
+            analyze_items,
             _analyzer(request),
             iter_archive(content, request.app.state.max_upload_bytes),
             anatomical_region,
@@ -149,7 +153,12 @@ async def analyze_archive_stream(
             ):
                 safe_name = PurePath(filename.replace("\\", "/")).name or "study.dcm"
                 yield json.dumps(
-                    {"type": "started", "filename": safe_name, "input_position": position},
+                    {
+                        "type": "started",
+                        "filename": safe_name,
+                        "input_path": filename,
+                        "input_position": position,
+                    },
                     ensure_ascii=False,
                 ) + "\n"
                 item = analyze_items(
@@ -187,7 +196,8 @@ async def analyze_archive_csv(
     """Обрабатывает ZIP тестового набора и возвращает единый CSV."""
     try:
         content = await _read_upload(archive, request.app.state.max_archive_bytes)
-        batch = analyze_items(
+        batch = await run_in_threadpool(
+            analyze_items,
             _analyzer(request),
             iter_archive(content, request.app.state.max_upload_bytes),
             anatomical_region,
