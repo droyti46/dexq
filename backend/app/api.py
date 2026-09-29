@@ -1,10 +1,12 @@
 """HTTP API DEXQ версии 1."""
 
+import json
+from collections.abc import Iterator
 from pathlib import PurePath
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 
 from app.analyzer import Analyzer
 from app.batch import MAX_ARCHIVE_FILES, analyze_items, iter_archive, render_csv
@@ -124,6 +126,56 @@ async def analyze_archive(
         )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@router.post("/analyses/archive.stream")
+async def analyze_archive_stream(
+    request: Request,
+    archive: Annotated[UploadFile, File()],
+    anatomical_region: Annotated[AnatomicalRegion, Form()] = AnatomicalRegion.AUTO,
+) -> StreamingResponse:
+    """Передаёт результаты элементов ZIP по мере их обработки."""
+    try:
+        content = await _read_upload(archive, request.app.state.max_archive_bytes)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    def events() -> Iterator[str]:
+        successful = 0
+        failed = 0
+        try:
+            for position, (filename, item_content) in enumerate(
+                iter_archive(content, request.app.state.max_upload_bytes), 1
+            ):
+                safe_name = PurePath(filename.replace("\\", "/")).name or "study.dcm"
+                yield json.dumps(
+                    {"type": "started", "filename": safe_name, "input_position": position},
+                    ensure_ascii=False,
+                ) + "\n"
+                item = analyze_items(
+                    _analyzer(request), [(filename, item_content)], anatomical_region
+                ).items[0]
+                item.input_position = position
+                if item.result is not None and item.result.processing_status == "Success":
+                    successful += 1
+                else:
+                    failed += 1
+                yield json.dumps(
+                    {"type": "result", "item": item.model_dump(mode="json")},
+                    ensure_ascii=False,
+                ) + "\n"
+            yield json.dumps(
+                {"type": "complete", "successful": successful, "failed": failed},
+                ensure_ascii=False,
+            ) + "\n"
+        except ValueError as error:
+            yield json.dumps({"type": "error", "detail": str(error)}, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="application/x-ndjson",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-store"},
+    )
 
 
 @router.post("/analyses/archive.csv")

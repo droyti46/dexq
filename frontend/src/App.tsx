@@ -1,20 +1,23 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 
 import AboutPage from './pages/AboutPage';
-import AnalyzePage from './pages/AnalyzePage';
 import LandingPage from './pages/LandingPage';
-import ResultPage from './pages/ResultPage';
 import TeamPage from './pages/TeamPage';
+import WorkspacePage from './pages/WorkspacePage';
+import ProjectsPage from './pages/ProjectsPage';
+import ProjectProvider from './components/ProjectProvider';
 
 export default function App() {
   return (
-    <Routes>
+    <ProjectProvider><Routes>
       <Route path="/" element={<LandingPage />} />
-      <Route path="/analyze" element={<AnalyzePage />} />
-      <Route path="/result" element={<ResultPage />} />
+      <Route path="/projects" element={<ProjectsPage />} />
+      <Route path="/projects/:projectId" element={<WorkspacePage />} />
+      <Route path="/analyze" element={<Navigate to="/projects" replace />} />
+      <Route path="/result" element={<Navigate to="/projects" replace />} />
       <Route path="/about" element={<AboutPage />} />
       <Route path="/team" element={<TeamPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    </Routes></ProjectProvider>
   );
 }

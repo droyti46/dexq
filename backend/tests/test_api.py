@@ -1,5 +1,6 @@
 """Контрактные тесты API на синтетическом обезличенном DICOM."""
 
+import json
 from io import BytesIO
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -260,6 +261,26 @@ def test_archive_same_basename_keeps_anonymous_member_positions() -> None:
     assert [item["input_position"] for item in items] == [1, 2]
     assert response.json()["failed"] == 2
     assert "private_a" not in response.text and "private_b" not in response.text
+
+
+def test_archive_stream_emits_incremental_item_events() -> None:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("study/one.dcm", b"invalid")
+        archive.writestr("study/two.dcm", b"invalid")
+    response = client.post(
+        "/api/v1/analyses/archive.stream",
+        files={"archive": ("studies.zip", buffer.getvalue(), "application/zip")},
+    )
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines()]
+    assert [event["type"] for event in events] == [
+        "started", "result", "started", "result", "complete"
+    ]
+    assert [event["filename"] for event in events if event["type"] == "started"] == [
+        "one.dcm", "two.dcm"
+    ]
+    assert events[-1] == {"type": "complete", "successful": 0, "failed": 2}
 
 
 def test_archive_rejects_unsupported_compression_with_422() -> None:
