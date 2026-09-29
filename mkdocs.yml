@@ -124,4 +124,5 @@ nav:
   - Модель:
       - model/index.md
       - Метрики: model/metrics.md
+      - Обучение и конвертация: model/training.md
       - Глоссарий: model/glossary.md
