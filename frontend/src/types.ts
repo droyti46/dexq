@@ -31,8 +31,8 @@ export interface AnalysisResult {
   image_uid: string | null;
   anatomical_region: AnatomicalRegion;
   region_source: string;
-  projection: 'unknown';
-  projection_source: 'not_determined';
+  projection: 'AP' | 'PA' | 'unknown';
+  projection_source: 'dicom_view_position' | 'not_determined';
   needs_review: boolean;
   quality_class: 0 | 1 | null;
   violation_types: string[];

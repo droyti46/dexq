@@ -1,0 +1,397 @@
+/* Оформление документации в стиле интерфейса DEXQ:
+   синий лендинга (#0202f1), графитовое рабочее пространство, шрифт Evolventa. */
+
+@font-face {
+  font-family: "Evolventa";
+  src: url("../fonts/Evolventa-Regular.woff") format("woff");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Evolventa";
+  src: url("../fonts/Evolventa-Bold.woff") format("woff");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --md-text-font: "Evolventa";
+  --md-code-font: "Cascadia Code";
+  --dexq-blue: #0202f1;
+  --dexq-blue-dark: #0000c8;
+  --dexq-ink: #12142c;
+  --dexq-radius: 14px;
+}
+
+/* ---------- Цветовые схемы ---------- */
+
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: #0202f1;
+  --md-primary-fg-color--light: #3b3bff;
+  --md-primary-fg-color--dark: #0000c8;
+  --md-accent-fg-color: #0202f1;
+  --md-accent-fg-color--transparent: rgba(2, 2, 241, 0.08);
+  --md-typeset-a-color: #0202f1;
+  --md-default-fg-color: #12142c;
+  --md-default-fg-color--light: #545872;
+  --md-default-fg-color--lighter: #8a8ea5;
+  --md-code-bg-color: #f4f5fa;
+  --dexq-line: #dfe2ee;
+  --dexq-card: #ffffff;
+  --dexq-card-hover: #f7f8fd;
+  --dexq-shadow: 0 14px 34px rgba(18, 20, 44, 0.12);
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #222529;
+  --md-primary-fg-color--light: #2c3035;
+  --md-primary-fg-color--dark: #191b1e;
+  --md-accent-fg-color: #92accb;
+  --md-accent-fg-color--transparent: rgba(146, 172, 203, 0.12);
+  --md-typeset-a-color: #9fbbe0;
+  --md-default-bg-color: #191b1e;
+  --md-default-fg-color: #edf0f2;
+  --md-default-fg-color--light: #c3c7ce;
+  --md-default-fg-color--lighter: #a8adb5;
+  --md-default-fg-color--lightest: #3b4047;
+  --md-code-bg-color: #222529;
+  --md-code-fg-color: #e3e7ea;
+  --md-footer-bg-color: #16181b;
+  --md-footer-bg-color--dark: #121416;
+  --dexq-line: #3b4047;
+  --dexq-card: #222529;
+  --dexq-card-hover: #2c3035;
+  --dexq-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+[data-md-color-scheme="slate"] .md-header,
+[data-md-color-scheme="slate"] .md-tabs {
+  border-bottom: 1px solid #3b4047;
+}
+
+/* ---------- Типографика ---------- */
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--md-default-fg-color);
+}
+
+.md-typeset h1 {
+  font-size: 2.1rem;
+  margin-bottom: 0.9em;
+}
+
+.md-typeset h2 {
+  margin-top: 2em;
+}
+
+.md-header__title {
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.md-header__button.md-logo img {
+  height: 1.7rem;
+  border-radius: 8px;
+}
+
+.md-tabs__link {
+  font-size: 0.74rem;
+  opacity: 0.85;
+}
+
+.md-tabs__link--active {
+  opacity: 1;
+  font-weight: 700;
+}
+
+.md-typeset .lead {
+  font-size: 1.05rem;
+  color: var(--md-default-fg-color--light);
+  line-height: 1.6;
+}
+
+/* ---------- Скриншоты: скругление, обводка, тень ---------- */
+
+.md-typeset img:not(.twemoji):not(.emojione):not(.gemoji):not(.no-frame) {
+  border: 1px solid var(--dexq-line);
+  border-radius: var(--dexq-radius);
+  box-shadow: var(--dexq-shadow);
+  background: var(--dexq-card);
+}
+
+.md-typeset figure {
+  margin: 1.6em auto;
+}
+
+.md-typeset figure img {
+  display: block;
+}
+
+.md-typeset figcaption {
+  margin-top: 0.9em;
+  font-size: 0.72rem;
+  color: var(--md-default-fg-color--lighter);
+  max-width: 44rem;
+}
+
+/* ---------- Карточки ---------- */
+
+.md-typeset .grid.cards > ul > li,
+.md-typeset .grid > .card {
+  border: 1px solid var(--dexq-line);
+  border-radius: var(--dexq-radius);
+  background: var(--dexq-card);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.md-typeset .grid.cards > ul > li:hover,
+.md-typeset .grid > .card:hover {
+  transform: translateY(-2px);
+  border-color: var(--md-accent-fg-color);
+  box-shadow: var(--dexq-shadow);
+}
+
+.md-typeset .grid.cards .twemoji {
+  color: var(--md-accent-fg-color);
+}
+
+[data-md-color-scheme="default"] .md-typeset .grid.cards .twemoji {
+  color: var(--dexq-blue);
+}
+
+/* ---------- Блоки кода, таблицы, заметки ---------- */
+
+.md-typeset pre > code,
+.md-typeset .highlight {
+  border-radius: 10px;
+}
+
+.md-typeset .tabbed-set {
+  border-radius: var(--dexq-radius);
+}
+
+.md-typeset table:not([class]) {
+  border: 1px solid var(--dexq-line);
+  border-radius: 12px;
+  overflow: hidden;
+  font-size: 0.72rem;
+}
+
+.md-typeset table:not([class]) th {
+  background: var(--md-accent-fg-color--transparent);
+  font-weight: 700;
+}
+
+.md-typeset .admonition,
+.md-typeset details {
+  border-radius: 12px;
+  border-width: 1px;
+  box-shadow: none;
+  font-size: 0.74rem;
+}
+
+.md-typeset kbd {
+  border-radius: 6px;
+}
+
+/* ---------- Главная: hero в стиле лендинга ---------- */
+
+.md-typeset .dexq-hero {
+  position: relative;
+  overflow: hidden;
+  margin: 0 0 2.2rem;
+  padding: 2.6rem 2.4rem 2.4rem;
+  border-radius: 22px;
+  color: #fff;
+  background:
+    radial-gradient(circle at 88% 20%, rgba(255, 255, 255, 0.18), transparent 38%),
+    radial-gradient(circle at 70% 110%, rgba(146, 172, 203, 0.35), transparent 45%),
+    linear-gradient(135deg, #0202f1 0%, #0000c8 100%);
+  box-shadow: 0 22px 50px rgba(2, 2, 241, 0.25);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .dexq-hero {
+  box-shadow: 0 22px 50px rgba(0, 0, 0, 0.5);
+}
+
+.md-typeset .dexq-hero::after {
+  content: "";
+  position: absolute;
+  right: -6rem;
+  top: -6rem;
+  width: 22rem;
+  height: 22rem;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 50%;
+}
+
+.md-typeset .dexq-hero .eyebrow {
+  margin: 0;
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.md-typeset .dexq-hero .wordmark {
+  margin: 0.2rem 0 0.8rem;
+  padding: 0;
+  font-size: 4.2rem;
+  line-height: 1;
+  font-weight: 400;
+  letter-spacing: -0.05em;
+  color: #fff;
+}
+
+.md-typeset .dexq-hero .tagline {
+  max-width: 34rem;
+  margin: 0 0 1.6rem;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.md-typeset .dexq-hero .md-button {
+  margin: 0 0.5rem 0.5rem 0;
+  border-radius: 10px;
+  border-color: #fff;
+  color: #fff;
+}
+
+.md-typeset .dexq-hero .md-button--primary {
+  background: #fff;
+  color: #0202f1;
+}
+
+.md-typeset .dexq-hero .md-button:hover {
+  background: rgba(255, 255, 255, 0.9);
+  color: #0000c8;
+}
+
+.md-typeset .md-button {
+  border-radius: 10px;
+}
+
+/* ---------- Пошаговые инструкции ---------- */
+
+.md-typeset .steps > ol {
+  counter-reset: step;
+  list-style: none;
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.md-typeset .steps > ol > li {
+  position: relative;
+  counter-increment: step;
+  margin: 0 0 0.4rem 0;
+  padding: 0 0 1.1rem 2.9rem;
+  border-left: 2px solid var(--dexq-line);
+  margin-left: 1rem;
+}
+
+.md-typeset .steps > ol > li:last-child {
+  border-left-color: transparent;
+}
+
+.md-typeset .steps > ol > li::before {
+  content: counter(step);
+  position: absolute;
+  left: -1.05rem;
+  top: -0.15rem;
+  width: 2rem;
+  height: 2rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--md-primary-fg-color);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.8rem;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .steps > ol > li::before {
+  background: #92accb;
+  color: #191b1e;
+}
+
+/* ---------- Метки HTTP-методов и статусов ---------- */
+
+.md-typeset .http {
+  display: inline-block;
+  min-width: 3.2em;
+  padding: 0.1em 0.55em;
+  border-radius: 6px;
+  font-family: var(--md-code-font-family);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-align: center;
+  color: #fff;
+}
+
+.md-typeset .http.get {
+  background: #13885d;
+}
+
+.md-typeset .http.post {
+  background: #0202f1;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .http.post {
+  background: #4d6fd6;
+}
+
+.md-typeset .pill {
+  display: inline-block;
+  padding: 0.05em 0.6em;
+  border-radius: 99px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  border: 1px solid currentColor;
+}
+
+.md-typeset .pill.ok {
+  color: #13885d;
+}
+
+.md-typeset .pill.bad {
+  color: #dd4b55;
+}
+
+.md-typeset .pill.warn {
+  color: #ba7b14;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .pill.ok {
+  color: #86c9aa;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .pill.bad {
+  color: #e79898;
+}
+
+@media screen and (min-width: 45em) {
+  .md-typeset .grid.cards.cards-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Скриншоты в двух колонках */
+.md-typeset .grid > figure {
+  margin: 0;
+}
+
+/* Чуть шире стандартной сетки — скриншотам нужно место */
+.md-grid {
+  max-width: 65rem;
+}
+
+.md-typeset .mermaid {
+  text-align: center;
+}

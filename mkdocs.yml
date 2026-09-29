@@ -1,0 +1,128 @@
+site_name: DEXQ
+site_description: Документация DEXQ — локального контроля качества DXA-снимков
+site_url: https://droyti46.github.io/dexq/
+repo_url: https://github.com/droyti46/dexq
+repo_name: droyti46/dexq
+edit_uri: edit/main/docs/
+copyright: Команда «Люди в черном» · исследовательский инструмент, не для диагностики
+
+docs_dir: docs
+exclude_docs: |
+  superpowers/
+  evaluation-readiness.md
+
+theme:
+  name: material
+  language: ru
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  font: false
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Тёмная тема
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Светлая тема
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - navigation.instant
+    - navigation.tracking
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+
+extra_css:
+  - assets/css/dexq.css
+
+plugins:
+  - search:
+      lang: ru
+  - glightbox:
+      touchNavigation: true
+      loop: false
+      effect: zoom
+      zoomable: true
+      draggable: false
+      skip_classes:
+        - no-lightbox
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      title: На этой странице
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Главная: index.md
+  - Запуск:
+      - start/index.md
+      - Веса моделей: start/weights.md
+      - В Docker: start/docker.md
+      - Без Docker: start/local.md
+      - Если что-то не так: start/troubleshooting.md
+      - Офлайн-поставка: start/offline.md
+  - Сайт:
+      - ui/index.md
+      - Проекты и загрузка: ui/projects.md
+      - Рабочее пространство: ui/workspace.md
+      - Ручная ось: ui/manual-axis.md
+      - Экспорт отчётов: ui/export.md
+      - Горячие клавиши: ui/shortcuts.md
+  - API:
+      - api/index.md
+      - Эндпоинты: api/endpoints.md
+      - Формат ответа: api/schemas.md
+      - CSV и CLI: api/csv.md
+  - Код:
+      - code/index.md
+      - Backend: code/backend.md
+      - Frontend: code/frontend.md
+      - Тесты и проверки: code/testing.md
+  - Модель:
+      - model/index.md
+      - Метрики: model/metrics.md
+      - Обучение и конвертация: model/training.md
+      - Глоссарий: model/glossary.md

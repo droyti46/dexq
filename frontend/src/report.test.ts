@@ -5,7 +5,7 @@ import type { WorkspaceItem } from './projects.ts';
 const completed: WorkspaceItem = { id: 'a', filename: '=SUM(1,2).png', size: 0, position: 1, status: 'error', progress: 100 };
 
 test('Excel exports same eight columns with literal filenames and no pending rows', () => {
-  const data = excelReportData([completed, { ...completed, id: 'b', status: 'queued' }]);
+  const data = excelReportData([completed, { ...completed, id: 'b', status: 'queued' }], 'submission');
   assert.equal(data.length, 2);
   assert.equal(data[0].length, 8);
   assert.equal(data[1][0].value, '=SUM(1,2).png');

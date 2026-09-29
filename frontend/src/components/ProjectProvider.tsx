@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { analyzeArchiveIncrementally, analyzeFile } from '../api';
 import { commitAxis, undoAxis, redoAxis } from '../axisHistory';
 import { estimatedProgress } from '../workspaceInteractions';
+import { resultWithSavedAxis } from '../manualAxis';
 import { appendFiles, maxFiles, removeItems, updateItem } from '../projects';
 import type { Axis, Project, WorkspaceItem } from '../projects';
 
@@ -16,6 +17,7 @@ interface ProjectContextValue {
   updateAxis: (projectId: string, itemId: string, axis: Axis | null) => void;
   commitAxisEdit: (projectId: string, itemId: string, before: Axis | null) => void;
   restoreAxis: (projectId: string, itemId: string, direction: 'undo' | 'redo') => void;
+  saveAxis: (projectId: string, itemId: string) => void;
 }
 
 const ProjectContext = createContext<ProjectContextValue | null>(null);
@@ -70,6 +72,7 @@ export default function ProjectProvider({ children }: { children: ReactNode }) {
     }, 150);
 
     async function process() {
+      let archiveOverflow = false;
       try {
         if (item!.filename.toLowerCase().endsWith('.zip')) {
           await analyzeArchiveIncrementally(item!.file!, 'auto', (event) => {
@@ -78,10 +81,13 @@ export default function ProjectProvider({ children }: { children: ReactNode }) {
             const current = projectsRef.current.find((entry) => entry.id === project!.id);
             if (!current?.items.some((entry) => entry.id === item!.id)) return;
             if (event.type === 'started') {
-              if (current.items.length >= maxFiles + 1) throw new Error(`Архив превышает лимит проекта: ${maxFiles} снимков.`);
+              if (current.items.length >= maxFiles + 1) {
+                archiveOverflow = true;
+                throw new Error(`Архив превышает лимит проекта: ${maxFiles} снимков.`);
+              }
               const child: WorkspaceItem = {
                 id: `${item!.id}:${event.input_position}`, archiveId: item!.id, filename: event.filename,
-                size: 0, position: Math.max(0, ...current.items.map((entry) => entry.position)) + 1,
+                inputPath: event.input_path, size: 0, position: Math.max(0, ...current.items.map((entry) => entry.position)) + 1,
                 status: 'analyzing', progress: 18,
               };
               changeProject(project!.id, (entry) => ({ ...entry, items: [...entry.items, child] }));
@@ -105,8 +111,9 @@ export default function ProjectProvider({ children }: { children: ReactNode }) {
       } catch (error) {
         if (!controller.signal.aborted) {
           const message = error instanceof Error ? error.message : 'Не удалось обработать снимок';
-          changeProject(project!.id, (current) => ({ ...current, items: current.items.map((entry) =>
-            (entry.id === item!.id || entry.archiveId === item!.id) && entry.status === 'analyzing'
+          changeProject(project!.id, (current) => ({ ...current, items: current.items
+            .filter((entry) => !archiveOverflow || entry.archiveId !== item!.id)
+            .map((entry) => (entry.id === item!.id || entry.archiveId === item!.id) && entry.status === 'analyzing'
               ? { ...entry, status: 'error', progress: 100, error: message } : entry) }));
           controller.abort();
         }
@@ -193,7 +200,21 @@ export default function ProjectProvider({ children }: { children: ReactNode }) {
     });
   }
 
-  return <ProjectContext.Provider value={{ projects, createProject, addFiles, deleteItems, togglePause, updateAxis, commitAxisEdit, restoreAxis }}>
+  function saveAxis(projectId: string, itemId: string) {
+    changeProject(projectId, (project) => {
+      const axis = project.manualAxes[itemId];
+      const items = project.items.map((item) => {
+        if (item.id !== itemId) return item;
+        const savedAxis: Axis | undefined = axis ? { top: [...axis.top], bottom: [...axis.bottom] } : undefined;
+        const saved = { ...item, savedAxis };
+        if (savedAxis && resultWithSavedAxis(saved) === item.result) throw new Error('Ручная ось недоступна для этого снимка.');
+        return saved;
+      });
+      return { ...project, items, updatedAt: Date.now() };
+    });
+  }
+
+  return <ProjectContext.Provider value={{ projects, createProject, addFiles, deleteItems, togglePause, updateAxis, commitAxisEdit, restoreAxis, saveAxis }}>
     {children}
   </ProjectContext.Provider>;
 }

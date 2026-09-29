@@ -7,7 +7,7 @@ from zipfile import ZipFile
 import pytest
 from test_analysis_contract import dicom
 
-from app.batch import analyze_items, read_archive, render_csv
+from app.batch import analyze_items, collect_local_files, iter_archive, read_archive, render_csv
 from app.schemas import AnalysisResult, AnatomicalRegion
 
 
@@ -15,7 +15,7 @@ class StudyAnalyzer:
     def analyze(self, content: bytes, filename: str, region: AnatomicalRegion) -> AnalysisResult:
         from app.imaging import safe_dicom_fields
 
-        uid, image_uid, _ = safe_dicom_fields(content, ".dcm")
+        uid, image_uid, _, _ = safe_dicom_fields(content, ".dcm")
         return AnalysisResult(
             analysis_id="an_test",
             filename=filename,
@@ -74,6 +74,16 @@ def test_batch_json_hides_archive_path_but_csv_keeps_relative_path() -> None:
     assert rows[0]["path_to_study"] == "SECRET_PERSON/study.dcm"
 
 
+def test_csv_neutralizes_formula_prefix_in_path() -> None:
+    batch = analyze_items(
+        StudyAnalyzer(), [("=HYPERLINK(\"https://example.invalid\")/study.dcm", b"invalid")],
+        AnatomicalRegion.AUTO,
+    )
+    rows = list(csv.DictReader(StringIO(render_csv(batch).lstrip("﻿"))))
+    assert rows[0]["path_to_study"].startswith("'=")
+    assert len(rows[0]) == 8
+
+
 def test_invalid_dicom_keeps_path_and_empty_uid_and_class() -> None:
     batch = analyze_items(StudyAnalyzer(), [("incoming/broken.dcm", b"bad")], AnatomicalRegion.AUTO)
     rows = list(csv.DictReader(StringIO(render_csv(batch).lstrip("﻿"))))
@@ -114,13 +124,35 @@ def test_archive_streams_one_member_at_a_time() -> None:
         next(images)
 
 
-def test_archive_rejects_more_than_two_hundred_images() -> None:
+def test_archive_accepts_one_thousand_images_without_model_inference() -> None:
     buffer = BytesIO()
     with ZipFile(buffer, "w") as archive:
-        for index in range(201):
-            archive.writestr(f"case_{index:04d}.dcm", b"not dicom")
-    with pytest.raises(ValueError, match="200"):
-        read_archive(buffer.getvalue(), 1024 * 1024)
+        for index in range(1000):
+            archive.writestr(f"study/case_{index:04d}.dcm", b"tiny")
+    images = iter_archive(buffer.getvalue(), 1024)
+    assert sum(1 for _ in images) == 1000
+
+
+def test_archive_rejects_more_than_one_thousand_images() -> None:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w") as archive:
+        for index in range(1001):
+            archive.writestr(f"case_{index:04d}.dcm", b"tiny")
+    with pytest.raises(ValueError, match="1000"):
+        next(iter_archive(buffer.getvalue(), 1024))
+
+
+def test_cli_directory_accepts_one_thousand_images(tmp_path) -> None:
+    for index in range(1000):
+        (tmp_path / f"case_{index:04d}.dcm").write_bytes(b"tiny")
+    assert len(collect_local_files(tmp_path, 1024)) == 1000
+
+
+def test_cli_directory_rejects_one_thousand_and_one_images(tmp_path) -> None:
+    for index in range(1001):
+        (tmp_path / f"case_{index:04d}.dcm").write_bytes(b"tiny")
+    with pytest.raises(ValueError, match="1000"):
+        collect_local_files(tmp_path, 1024)
 
 
 def test_archive_rejects_duplicate_image_name() -> None:

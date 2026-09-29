@@ -1,15 +1,18 @@
 import type { AnalysisResult, Point } from './types';
+import { reportTable } from './manualAxis.ts';
 
 export type Axis = { top: Point; bottom: Point };
 export interface WorkspaceItem {
   id: string;
   file?: File;
   filename: string;
+  inputPath?: string;
   size: number;
   position: number;
   status: 'queued' | 'analyzing' | 'ready' | 'error';
   progress: number;
   result?: AnalysisResult;
+  savedAxis?: Axis;
   error?: string;
   localPreview?: string;
   archiveId?: string;
@@ -26,7 +29,7 @@ export interface Project {
   paused: boolean;
 }
 
-export const maxFiles = 200;
+export const maxFiles = 1000;
 const extensions = ['.dcm', '.dicom', '.png', '.jpg', '.jpeg', '.zip'];
 
 export function appendFiles(items: WorkspaceItem[], files: File[]): WorkspaceItem[] {
@@ -65,18 +68,13 @@ export function selectItems(
   return [clicked];
 }
 
-export function reportCsv(items: WorkspaceItem[]): string {
+export function reportCsv(items: WorkspaceItem[], kind: 'submission' | 'clinical' = 'clinical'): string {
   const quote = (value: unknown): string => {
     let text = String(value ?? '');
     if (/^[\s]*[=+\-@\t\r\n]/.test(text)) text = `'${text}`;
     return `"${text.replaceAll('"', '""')}"`;
   };
-  const rows = items.filter((item) => item.status === 'ready' || item.status === 'error').map((item) => {
-    const result = item.result;
-    return [item.filename, result?.study_uid, result?.image_uid, result?.anatomical_region ?? 'unknown',
-      result?.quality_class, result?.violation_types.join(';') ?? '', result?.processing_status ?? 'Failure',
-      result?.time_of_processing].map(quote).join(',');
-  });
-  return '﻿path_to_study,study_uid,image_uid,anatomical_region,quality_class,violation_type,processing_status,time_of_processing\r\n'
-    + rows.join('\r\n') + '\r\n';
+  const { headers, rows } = reportTable(items, kind);
+  return '﻿' + headers.join(',') + '\r\n'
+    + rows.map((row) => row.map(quote).join(',')).join('\r\n') + '\r\n';
 }

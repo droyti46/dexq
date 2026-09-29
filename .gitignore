@@ -25,3 +25,5 @@ backend/uploads/
 *.log
 .DS_Store
 .venv-motion/
+
+site/

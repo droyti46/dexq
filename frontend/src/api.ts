@@ -1,7 +1,7 @@
 import type { AnalysisResult, AnatomicalRegion, BatchResult } from './types';
 
 export type ArchiveStreamEvent =
-  | { type: 'started'; filename: string; input_position: number }
+  | { type: 'started'; filename: string; input_position: number; input_path: string }
   | { type: 'result'; item: BatchResult['items'][number] }
   | { type: 'complete'; successful: number; failed: number }
   | { type: 'error'; detail: string };

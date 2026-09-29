@@ -1,57 +1,109 @@
-# DEXQ
+<p align="center">
+  <img src="docs/assets/logo.svg" alt="DEXQ" width="68" height="68">
+</p>
+<h1 align="center">DEXQ</h1>
+<p align="center"><strong>Локальный контроль качества DXA-исследований</strong><br>Позвоночник и бедро · анализ на CPU · отчёт для специалиста</p>
+<p align="center">
+  <a href="https://droyti46.github.io/dexq/">Документация</a> ·
+  <a href="https://droyti46.github.io/dexq/start/">Запуск</a> ·
+  <a href="https://droyti46.github.io/dexq/ui/">Интерфейс</a> ·
+  <a href="https://droyti46.github.io/dexq/api/">API</a>
+</p>
 
-Локальный технический MVP для контроля качества DXA-снимков. Финальное эталонное решение работает за FastAPI и React без изменения модельного ядра; результаты — исследовательские, **не** клиническая валидация и не диагноз. Не загружайте DICOM и производные изображения во внешние сервисы.
+<p align="center">
+  <a href="docs/images/01-landing.png"><img src="docs/images/01-landing.png" alt="Главная страница DEXQ" width="850"></a>
+</p>
 
-## Запуск без Docker (проверен локально)
+## О решении
 
-Нужны Python 3.12, Node.js 22 и **отдельный** оптимизированный архив `dxa_qc_with_models (2).zip`, SHA-256 `b92ed6e89b1bb54358b1e06681842dbecac006880cf9062ea68980673ff12f0a`. Веса **не входят в Git**; 22 runtime-файла (276 423 364 байта вместе с манифестами и конфигурацией) устанавливаются локально перед первым запуском.
+DEXQ принимает DXA-исследования в DICOM, определяет анатомическую область и локально оценивает качество снимка до просмотра специалистом. Сервис работает на CPU; снимки передаются только локальному серверу DEXQ, не во внешние сервисы. **Это исследовательский инструмент, не диагноз и не клинически валидированное медицинское изделие.** [Подробнее о решении →](https://droyti46.github.io/dexq/)
 
-Из каталога `backend/`:
+## Возможности
 
-```bash
-python -m venv .venv
-.venv/bin/python -m pip install -e '.[dev]'
-.venv/bin/python ../scripts/prepare_reference.py "/local/path/dxa_qc_with_models (2).zip"
-.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+Позвоночник: охват, наклон оси, артефакты. Бедро: общий флаг позиционирования/ротации и оценка охвата ROI. В интерфейсе есть проекты, пакетная загрузка, просмотр ориентиров и сохранение ручной правки оси; автоматический результат при этом не перезаписывается. [Проверки и интерфейс →](https://droyti46.github.io/dexq/ui/workspace/)
+
+<table>
+  <tr>
+    <td width="50%"><a href="docs/images/05-workspace-tilted.png"><img src="docs/images/05-workspace-tilted.png" alt="Проверки позвоночника и найденная ось" width="100%"></a></td>
+    <td width="50%"><a href="docs/images/07-workspace-hip.png"><img src="docs/images/07-workspace-hip.png" alt="Проверки бедра и охват зоны интереса" width="100%"></a></td>
+  </tr>
+  <tr><td>Позвоночник: ось и отдельные проверки</td><td>Бедро: укладка и охват поля</td></tr>
+</table>
+
+Скриншоты сняты на обезличенных демонстрационных исследованиях, уже приведённых в документации. Они показывают интерфейс, а не качество на независимой выборке.
+
+## Ограничения
+
+Метрики получены на development-наборе, а не на независимых пациентах. Проекция AP/PA отображается только при явном теге DICOM `ViewPosition`; ротация бедра отдельно от позиционирования не распознаётся, отступы ROI в сантиметрах не измеряются. Правило ручного угла 5° — эвристика; медицинский итог остаётся за специалистом. [Модель и границы интерпретации →](https://droyti46.github.io/dexq/model/)
+
+## Структура проекта
+
+```text
+backend/                 FastAPI, проверки, эталонный runtime и тесты
+backend/models/reference/  локальные веса и манифест (не входят в Git)
+frontend/                React, TypeScript и Nginx
+docs/                    документация и скриншоты
+scripts/                 подготовка весов и запуск
+docker-compose.yml        сервер и веб-интерфейс
 ```
 
-Для Windows вместо `.venv/bin/python` используйте `.venv/Scripts/python`. Frontend в отдельном терминале:
+Веса подключаются к backend-контейнеру только для чтения; состояние проектов и ручные правки живут в памяти вкладки браузера. [Устройство кода →](https://droyti46.github.io/dexq/code/)
 
-```bash
-npm --prefix frontend ci
-npm --prefix frontend run dev
+```mermaid
+flowchart LR
+    I["DICOM / ZIP"] --> U["Браузер · React"]
+    U --> N["Nginx · :3000"]
+    N --> A["FastAPI · :8000"]
+    W[("Веса на диске")] -. "только чтение" .-> A
+    A --> P{"Область снимка"}
+    P -->|Позвоночник| S["Охват · ось · артефакты"]
+    P -->|Бедро| H["Укладка/ротация · охват"]
+    S --> U
+    H --> U
 ```
 
-Веб-интерфейс: <http://localhost:3000>; документация API: <http://localhost:8000/docs>. Пока веса не установлены/не загрузились, `/api/v1/health` отвечает 503; fallback на другую модель не предусмотрен. Для контейнеров, проверки манифеста и ограничений офлайн-поставки см. [развёртывание](docs/deployment.md); скрипт `scripts/run.sh` требует локальный Docker Engine, рабочий контейнерный запуск в текущем окружении пока **не подтверждён**.
+## Системные требования и зависимости
 
-## Демо и данные
+Для контейнеров нужны Linux с Docker Engine и Compose (либо macOS/Windows с работающим Docker Desktop), Python 3 для предварительной проверки весов и примерно 4 ГБ ОЗУ; GPU не требуется. Для запуска без Docker — Python 3.12 и Node.js 22. Зависимости закреплены в `backend/requirements.lock`, `frontend/package-lock.json` и digest базовых образов. [Требования и зависимости →](https://droyti46.github.io/dexq/start/) · [Образы и офлайн-ограничения →](https://droyti46.github.io/dexq/start/offline/)
 
-Локально разложить 255 обезличенных примеров по экспертным категориям можно командой из `backend/`:
+## Quick Start: Docker
 
-```bash
-.venv/bin/python ../scripts/prepare_samples.py "/local/path/dxa_qc_with_models (2).zip" --output ../local-test-images
-```
+**Два разных источника:** комплект `dexq.zip` может включать готовый каталог `backend/models/reference/` с манифестом; **GitHub-репозиторий весов не содержит**. Для клона из GitHub сначала [установите модели](https://droyti46.github.io/dexq/start/weights/) из локального эталонного архива. Первая сборка Docker требует доступ к образам и зависимостям из сети или подготовленного кэша — передача папки сама по себе не гарантирует офлайн-сборку.
 
-Папка игнорируется Git: `normal/`, `spine_positioning/`, `spine_axis/`, `spine_artifacts/`, `hip_positioning_rotation/`, `hip_roi/`, `multiple/`, `unlabeled/`. Один снимок может быть в нескольких категориях; это development-набор, не независимая проверка. [Руководство по экрану, ручной оси и CSV](docs/user-guide.md).
-
-API принимает одиночный DICOM или демонстрационный grayscale PNG, пакет до 200 файлов и архив ZIP до 200 изображений для JSON или CSV; веб-интерфейс тоже принимает один ZIP. Экспорт содержит по одной строке на входное изображение, включая `Failure`, и восемь столбцов задания. Для локального CLI:
+Из корня распакованного комплекта на Linux/macOS:
 
 ```bash
-cd backend
-.venv/bin/python -m app.cli /local/path/studies.zip /local/path/results.csv
+sh scripts/run.sh
 ```
 
-Ограничения: проекция не определяется, бедро выдаёт объединённый флаг позиционирования/ротации, bbox бедра не анатомическая маска. Автоматический результат модели и ручная правка **двух найденных** точек позвоночника показаны отдельно; сервер исправления не хранит. Разбивку проверок и границы интерпретации см. в [спецификации](SPEC.md) и [описании модели](docs/model.md); численные оценки — в [метриках](docs/metrics.md).
+Скрипт проверяет SHA-256 весов и выполняет `docker compose up --build`. Через `sh` он запускается и из Git, где файл не помечен исполняемым. На Windows при работающем Docker Desktop задайте `$env:DEXQ_MODELS_DIR = (Resolve-Path .\backend\models\reference).Path` и выполните `docker compose up --build`. [Пошаговый запуск и проверка healthcheck →](https://droyti46.github.io/dexq/start/docker/)
 
-## Проверка изменений
+| Сервис | Локальный адрес |
+| --- | --- |
+| Сайт | <http://localhost:3000> |
+| Swagger UI | <http://localhost:8000/docs> |
+| Готовность моделей | <http://localhost:8000/api/v1/health> |
 
-```bash
-cd backend
-.venv/bin/python -m pytest
-.venv/bin/python -m ruff check .
-cd ../frontend
-npm run build
-node --experimental-strip-types --test src/geometry.test.ts
-```
+**Проверено 29.09.2026:** текущие frontend/backend собраны через Docker Compose в локальной Ubuntu Server 24.04.5 VM; backend `healthy`, страницы и API доступны через Nginx. Обезличенный development-снимок с синтетическими UID дал `Success`; ZIP с ним вернул поток результатов и официальный CSV с относительным путём и восьмью колонками. Это подтверждает работу **на этой VM**, но не чистую офлайн-установку или точность на закрытом наборе. [Проверка контейнеров →](https://droyti46.github.io/dexq/start/docker/) · [Ограничения офлайн-поставки →](https://droyti46.github.io/dexq/start/offline/)
 
-Для parity на исходных снимках укажите локальный `DEXQ_REFERENCE_ZIP` с путём к архиву перед pytest. Данные из архива — development-набор, не независимая клиническая проверка; описание оценок см. в [метриках](docs/metrics.md). Новый локальный benchmark текущего комплекта на 102 исследованиях/255 уникальных DICOM: 255/255 `Success`, максимум 15.895 с/исследование (≤3 кадра), среднее 4.262 с на прогретом CPUExecutionProvider, холодная загрузка 2.6479 с. Это те же development-снимки, а не независимая проверка точности или аппаратных требований; прежний benchmark относился к предыдущим весам. Офлайн Docker-запуск не подтверждён.
+## API
+
+`GET /api/v1/health` проверяет готовность; `POST /api/v1/analyses` принимает один файл. `/analyses/batch` обрабатывает до 200 файлов, `/analyses/archive.stream` — ZIP до 1000 изображений с поэлементным результатом; доступны также JSON и CSV-маршруты. [Все маршруты и примеры запросов →](https://droyti46.github.io/dexq/api/)
+
+## Входные и выходные данные
+
+Вход: однокадровый одноканальный 8-bit `MONOCHROME2` DICOM; grayscale PNG — для технического демо, одиночный JPEG сайт преобразует локально. Выход: JSON для изображения или CSV/XLSX — одна строка на завершённый снимок, включая `Failure`. Официальный файл содержит **ровно восемь полей задания**, исходный путь ZIP и UID из DICOM; отдельный отчёт врача включает сохранённые ручные ориентиры. [Формат ответа →](https://droyti46.github.io/dexq/api/schemas/) · [CSV и Excel →](https://droyti46.github.io/dexq/ui/export/)
+
+## Модель, предобработка и результат
+
+Локальный ONNX runtime выбирает область и запускает применимые проверки. Для оси позвоночника кадр масштабируется до 512×512, для бедра используется letterbox 320×320; исходные пиксели DICOM не переписываются. На выходе применимые проверки сводятся к классу `1` при нарушении и `0` при полной оценке без нарушений; неопределённая обязательная проверка даёт `Failure` без класса. Версии весов, SHA-256, нормализация и пороги описаны в разделе [Модель и пред-/постобработка →](https://droyti46.github.io/dexq/model/).
+
+## Известные ошибки и их обработка
+
+Повреждённый/неподдерживаемый DICOM, недоступные веса или превышенный лимит дают понятную ошибку; пакет сохраняет отдельную строку `Failure` вместо потери остальных результатов. `/health` возвращает 503 при недоступности модели, одиночный анализ — 422 для неподходящего входа. Незавершённый поток ZIP не считается готовым отчётом. [Ошибки и восстановление →](https://droyti46.github.io/dexq/start/troubleshooting/) · [Контракт API →](https://droyti46.github.io/dexq/api/)
+
+## Documentation и проверка кода
+
+Полные инструкции по [запуску](https://droyti46.github.io/dexq/start/), [интерфейсу](https://droyti46.github.io/dexq/ui/), [API](https://droyti46.github.io/dexq/api/), [модели](https://droyti46.github.io/dexq/model/) и [структуре кода](https://droyti46.github.io/dexq/code/) доступны в MkDocs. Проверка изменений: `pytest` и `ruff check .` из `backend/`, `npm run build` и Node-тесты из `frontend/`. [Команды и методика →](https://droyti46.github.io/dexq/code/testing/)
+
+<sub>Команда «Люди в черном».</sub>

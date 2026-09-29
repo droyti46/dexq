@@ -142,7 +142,9 @@ button:disabled { cursor: not-allowed; opacity: .4; }
 .inspector-note, .manual-note p { font-size: 10px; color: var(--work-muted); line-height: 1.7; margin: 15px 4px; }
 .manual-note { margin-top: 12px; padding: 12px; border: 1px solid var(--work-line); border-radius: 6px; font-size: 12px; }
 .manual-note p { margin: 8px 0 12px; }
-.manual-note .quiet-button { font-size: 10px; padding: 8px; }
+.manual-note .quiet-button, .manual-note .solid-button { font-size: 10px; padding: 8px; }
+.manual-save-status { display: block; margin-bottom: 12px; font-size: 10px; color: var(--work-accent); line-height: 1.6; }
+.manual-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .processing-bar { display: flex; align-items: center; gap: 14px; margin: 0 10px 10px; padding: 0 16px; border: 1px solid var(--work-line); border-radius: 7px; background: var(--work-panel); }
 .processing-overview { flex: 1; min-width: 170px; display: flex; align-items: center; gap: 14px; }
 .processing-overview strong { font-size: 11px; display: block; white-space: nowrap; }

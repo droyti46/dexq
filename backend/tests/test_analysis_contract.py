@@ -119,12 +119,31 @@ def test_missing_required_axis_decision_is_failure() -> None:
     assert result.geometry is not None and result.geometry.axis_line is None
 
 
+def test_explicit_dicom_view_is_reported_without_changing_quality() -> None:
+    for view, expected in [("AP", "AP"), ("PA", "PA")]:
+        runtime = FakeRuntime(spine_result())
+        result = Analyzer(runtime).analyze(dicom(view), "study.dcm")
+        assert runtime.calls == 1
+        assert result.processing_status == "Success"
+        assert result.quality_class == 0
+        assert result.projection == expected
+        assert result.projection_source == "dicom_view_position"
+        assert "SECRET" not in result.model_dump_json()
+
+
+def test_unknown_dicom_view_is_not_guessed_from_anatomy() -> None:
+    result = Analyzer(FakeRuntime(spine_result())).analyze(dicom(), "spine.dcm")
+    assert result.projection == "unknown"
+    assert result.projection_source == "not_determined"
+
+
 def test_unsupported_view_never_reaches_model() -> None:
     runtime = FakeRuntime(spine_result())
     result = Analyzer(runtime).analyze(dicom("LATERAL"), "study.dcm")
     assert result.processing_status == "Failure"
     assert result.quality_class is None
     assert runtime.calls == 0
+    assert result.projection == "unknown"
 
 
 def test_invalid_uid_warning_never_contains_identifier() -> None:

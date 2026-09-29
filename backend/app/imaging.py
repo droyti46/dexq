@@ -8,6 +8,7 @@ import warnings
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pydicom
@@ -19,21 +20,23 @@ from pydicom.pixels import apply_voi_lut
 from app.schemas import AnatomicalRegion
 
 
-def safe_dicom_fields(content: bytes, suffix: str) -> tuple[str | None, str | None, bool]:
-    """Читает только два UID и факт наличия неподдерживаемой проекции.
+def safe_dicom_fields(
+    content: bytes, suffix: str
+) -> tuple[str | None, str | None, Literal["AP", "PA", "unknown"], bool]:
+    """Читает только два UID и известную проекцию из DICOM.
 
     Args:
         content: Исходные байты DICOM или PNG.
         suffix: Расширение входного файла.
 
     Returns:
-        UID исследования, UID изображения и признак явной иной проекции.
+        UID исследования, UID изображения, AP/PA при явном теге и признак иной проекции.
 
     Raises:
         ValueError: Если DICOM повреждён или пуст.
     """
     if suffix.lower() == ".png":
-        return None, None, False
+        return None, None, "unknown", False
     if not content:
         raise ValueError("Файл пуст")
     try:
@@ -43,11 +46,15 @@ def safe_dicom_fields(content: bytes, suffix: str) -> tuple[str | None, str | No
                 stop_before_pixels=True,
                 specific_tags=["StudyInstanceUID", "SOPInstanceUID", "ViewPosition"],
             )
-            view = str(dataset.get("ViewPosition", "")).strip().lower()
+            view = str(dataset.get("ViewPosition", "")).strip().upper()
+            projection: Literal["AP", "PA", "unknown"] = (
+                view if view in {"AP", "PA"} else "unknown"
+            )
             return (
                 _safe_uid(dataset.get("StudyInstanceUID")),
                 _safe_uid(dataset.get("SOPInstanceUID")),
-                bool(view and view != "unknown"),
+                projection,
+                bool(view and view not in {"AP", "PA", "UNKNOWN"}),
             )
     except (InvalidDicomError, OSError, ValueError) as error:
         raise ValueError("Не удалось прочитать DICOM") from error

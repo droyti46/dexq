@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import re
 import stat
 from collections.abc import Iterable, Iterator
 from io import BytesIO, StringIO
@@ -13,7 +14,7 @@ from app.analyzer import Analyzer
 from app.schemas import AnatomicalRegion, BatchItem, BatchResult
 
 SUPPORTED_SUFFIXES = {".dcm", ".dicom", ".png", ".jpg", ".jpeg"}
-MAX_ARCHIVE_FILES = 200
+MAX_ARCHIVE_FILES = 1000
 MAX_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
 
 
@@ -182,9 +183,13 @@ def render_csv(batch: BatchResult) -> str:
     writer.writeheader()
     for item in batch.items:
         result = item.result
+        input_path = item.input_path or item.filename
+        # Идентичность пути сохраняется, но Excel не должен исполнять его как формулу.
+        if re.match(r"^\s*[=+\-@\t\r\n]", input_path):
+            input_path = "'" + input_path
         writer.writerow(
             {
-                "path_to_study": item.input_path or item.filename,
+                "path_to_study": input_path,
                 "study_uid": result.study_uid if result else "",
                 "image_uid": result.image_uid if result else "",
                 "anatomical_region": result.anatomical_region if result else "unknown",

@@ -85,7 +85,7 @@ def main() -> None:
     for path in sorted(source.rglob("*")):
         if not path.is_file() or path.suffix.lower() not in {".dcm", ".dicom"}:
             continue
-        uid, _, _ = safe_dicom_fields(path.read_bytes(), path.suffix.lower())
+        uid, _, _, _ = safe_dicom_fields(path.read_bytes(), path.suffix.lower())
         groups[uid or f"unknown-{len(groups)}"].append(path)
     runtime = ReferenceRuntime(args.models)
     started = time.perf_counter()
