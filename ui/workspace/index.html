@@ -1371,6 +1371,8 @@
       
         
       
+        
+      
     
     
     
@@ -1440,6 +1442,34 @@
     
   
     Метрики
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../model/training/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Обучение и конвертация
   
 
     
@@ -1640,7 +1670,7 @@
 
 <figure>
 <p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../images/04-workspace-normal.png" data-desc-position="bottom"><img alt="Рабочее пространство со снимком позвоночника без нарушений" src="../../images/04-workspace-normal.png"></a></p>
-<figcaption>Снимок без нарушений: зелёная плашка «Нарушений не выявлено», все три проверки позвоночника — «Норма».</figcaption>
+<figcaption>Снимок поясничного отдела без нарушений (ось отклонена на 3,7°): зелёная плашка «Нарушений не выявлено», все три проверки позвоночника — «Норма».</figcaption>
 </figure>
 <table>
 <thead>
@@ -1702,7 +1732,7 @@
 <h2 id="_3">Снимок с нарушением<a class="headerlink" href="#_3" title="Permanent link">¶</a></h2>
 <figure>
 <p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../images/05-workspace-tilted.png" data-desc-position="bottom"><img alt="Снимок позвоночника с наклонённой осью и красной плашкой «Есть нарушение качества»" src="../../images/05-workspace-tilted.png"></a></p>
-<figcaption>Ось позвоночника отклонена на 8,6° — больше порога 5°. Итог «Есть нарушение качества», проверка «Наклон оси позвоночника» — «Нарушение».</figcaption>
+<figcaption>Ось позвоночника отклонена на 8,3° — больше порога 5°. Итог «Есть нарушение качества», проверка «Наклон оси позвоночника» — «Нарушение».</figcaption>
 </figure>
 <p>Жёлтая линия с двумя точками — ось, которую нашла модель по центрам верхнего и нижнего позвонков. Щёлкните по проверке в правой панели, чтобы раскрыть её пояснение:</p>
 <figure>
@@ -1712,7 +1742,7 @@
 <h2 id="_4">Снимок бедра<a class="headerlink" href="#_4" title="Permanent link">¶</a></h2>
 <figure>
 <p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../images/07-workspace-hip.png" data-desc-position="bottom"><img alt="Снимок бедра с бирюзовой рамкой и нарушением охвата ROI" src="../../images/07-workspace-hip.png"></a></p>
-<figcaption>Для бедра выполняются две проверки. Бирюзовая рамка — граница светлой области снимка, а не анатомическая маска.</figcaption>
+<figcaption>Для бедра выполняются две проверки. Здесь ротация в норме, но охват ROI нарушен. Бирюзовая рамка — граница светлой области снимка, а не анатомическая маска.</figcaption>
 </figure>
 <div class="admonition note">
 <p class="admonition-title">Ограничения проверок бедра</p>
@@ -1724,7 +1754,7 @@
 <h2 id="_5">Ошибка обработки<a class="headerlink" href="#_5" title="Permanent link">¶</a></h2>
 <figure>
 <p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../../images/08-workspace-error.png" data-desc-position="bottom"><img alt="Экран «Не удалось обработать снимок» для повреждённого файла" src="../../images/08-workspace-error.png"></a></p>
-<figcaption>Повреждённый файл получил статус «Ошибка». Остальные снимки проекта обработаны как обычно.</figcaption>
+<figcaption>Файл с расширением <code>.dcm</code>, который на самом деле не является DICOM, получил статус «Ошибка». Остальные снимки проекта обработаны как обычно.</figcaption>
 </figure>
 <p>Ошибка одного файла не останавливает очередь и не влияет на соседние снимки. В отчёт такой файл тоже попадёт — со статусом <code>Failure</code> и пустым классом.</p>
 <h2 id="_6">Параметры снимка<a class="headerlink" href="#_6" title="Permanent link">¶</a></h2>

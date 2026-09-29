@@ -1349,6 +1349,8 @@
       
         
       
+        
+      
     
     
     
@@ -1418,6 +1420,34 @@
     
   
     Метрики
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../model/training/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Обучение и конвертация
   
 
     
@@ -1660,7 +1690,7 @@
 <li><strong>Позвоночник:</strong> эвристика охвата, SpineNet для центров позвонков и угла оси, классификатор артефактов.</li>
 <li><strong>Бедро:</strong> модель стороны, затем два классификатора поверх признаков ResNet18 — позиционирование/ротация и охват ROI.</li>
 </ol>
-<p>Все нейросети — ONNX, запускаются на <code>CPUExecutionProvider</code>. Подробно о предобработке и порогах — в разделе <a href="../../model/">Модель</a>.</p>
+<p>Все нейросети — ONNX, запускаются на <code>CPUExecutionProvider</code>. Подробно о предобработке и порогах — в разделе <a href="../../model/">Модель</a>; команды обучения и конвертации PyTorch → ONNX — в разделе <a href="../../model/training/">Обучение и конвертация</a>.</p>
 <h2 id="referenceruntime">Как устроен <code>ReferenceRuntime</code><a class="headerlink" href="#referenceruntime" title="Permanent link">¶</a></h2>
 <ul>
 <li><strong>Одна загрузка на процесс.</strong> Модели загружаются при первом <code>ready()</code> или <code>infer()</code> и дальше переиспользуются.</li>
