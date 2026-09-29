@@ -11,7 +11,7 @@ export default function AppShell({ children, dark = false }: AppShellProps) {
     <div className={dark ? 'app-shell app-shell--dark' : 'app-shell'}>
       <header className="site-header">
         <nav className="site-nav" aria-label="Основная навигация">
-          <a href="http://localhost:8000/docs" target="_blank" rel="noreferrer">
+          <a href="https://droyti46.github.io/dexq/" target="_blank" rel="noreferrer">
             Документация
           </a>
           <Link className="wordmark" to="/" aria-label="DEXQ — главная">
